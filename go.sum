@@ -103,8 +103,8 @@ github.com/uptrace/opentelemetry-go-extra/otelutil v0.3.2 h1:3/aHKUq7qaFMWxyQV0W
 github.com/uptrace/opentelemetry-go-extra/otelutil v0.3.2/go.mod h1:Zit4b8AQXaXvA68+nzmbyDzqiyFRISyw1JiD5JqUBjw=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zitadel/oidc v1.13.4 h1:+k2GKqP9Ld9S2MSFlj+KaNsoZ3J9oy+Ezw51EzSFuC8=
-github.com/zitadel/oidc v1.13.4/go.mod h1:3h2DhUcP02YV6q/CA/BG4yla0o6rXjK+DkJGK/dwJfw=
+github.com/zitadel/oidc v1.13.5 h1:7jhh68NGZitLqwLiVU9Dtwa4IraJPFF1vS+4UupO93U=
+github.com/zitadel/oidc v1.13.5/go.mod h1:rHs1DhU3Sv3tnI6bQRVlFa3u0lCwtR7S21WHY+yXgPA=
 go.opentelemetry.io/contrib/instrumentation/host v0.55.0 h1:V/Cy5A2ydwvyED4ewwXJ441R3QllG+U8tXXVOjPeX4Y=
 go.opentelemetry.io/contrib/instrumentation/host v0.55.0/go.mod h1:fsY+EfHPwa1bQcxOUPv1FWaQXAwY+RliLRs6B6qgJes=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.55.0 h1:ZIg3ZT/aQ7AfKqdwp7ECpOK6vHqquXXuyTjIO8ZdmPs=
