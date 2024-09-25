@@ -47,7 +47,7 @@ deploy:
     RUN kubectl patch Versions.formance.com default -p "{\"spec\":{\"stargate\": \"${tag}\"}}" --type=merge
 
 deploy-staging:
-    BUILD --pass-args core+deployer-module --MODULE=stargate
+    BUILD --pass-args core+deploy-staging
 
 lint:
     FROM core+builder-image
