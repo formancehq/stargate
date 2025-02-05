@@ -15,7 +15,7 @@ require (
 	go.opentelemetry.io/otel v1.34.0
 	go.opentelemetry.io/otel/metric v1.34.0
 	go.uber.org/fx v1.23.0
-	golang.org/x/oauth2 v0.25.0
+	golang.org/x/oauth2 v0.26.0
 	golang.org/x/sync v0.10.0
 	google.golang.org/grpc v1.70.0
 	google.golang.org/protobuf v1.36.4
