@@ -2,7 +2,7 @@ module github.com/formancehq/stack/ee/stargate
 
 go 1.22.0
 
-toolchain go1.22.7
+toolchain go1.24.1
 
 require (
 	github.com/alitto/pond v1.9.2
@@ -17,7 +17,7 @@ require (
 	go.uber.org/fx v1.23.0
 	golang.org/x/oauth2 v0.25.0
 	golang.org/x/sync v0.10.0
-	google.golang.org/grpc v1.70.0
+	google.golang.org/grpc v1.71.1
 	google.golang.org/protobuf v1.36.4
 )
 
