@@ -58,14 +58,17 @@ func Module(
 		fx.Provide(fx.Annotate(noop.NewMeterProvider, fx.As(new(metric.MeterProvider)))),
 		fx.Provide(metrics.RegisterMetricsRegistry),
 		fx.Provide(NewClient),
-		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor) {
+		fx.Invoke(func(lc fx.Lifecycle, client *Client, logger logging.Logger, authInterceptor *interceptors.AuthInterceptor) {
 			lc.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
+					logger.Infof("Starting stargate client")
 					if err := authInterceptor.ScheduleRefreshToken(); err != nil {
 						return err
 					}
+					logger.Infof("Auth interceptor started")
 
 					go func() {
+						logger.Infof("Running app")
 						err := client.Run(context.Background())
 						if err != nil && err != context.Canceled {
 							panic(err)
