@@ -9,12 +9,16 @@ type MetricsRegistry interface {
 	HTTPCallLatencies() metric.Int64Histogram
 	HTTPCallStatusCodes() metric.Int64Counter
 	ServerMessageReceivedByType() metric.Int64Counter
+	ConnectionRetries() metric.Int64Counter
+	ConnectionStatus() metric.Int64UpDownCounter
 }
 
 type metricsRegistry struct {
 	httpCallLatencies           metric.Int64Histogram
 	httpCallStatusCodes         metric.Int64Counter
 	serverMessageReceivedByType metric.Int64Counter
+	connectionRetries           metric.Int64Counter
+	connectionStatus            metric.Int64UpDownCounter
 }
 
 func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistry, error) {
@@ -47,10 +51,30 @@ func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistr
 		return nil, err
 	}
 
+	connectionRetries, err := meter.Int64Counter(
+		"connection_retries",
+		metric.WithUnit("1"),
+		metric.WithDescription("Number of connection retry attempts"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	connectionStatus, err := meter.Int64UpDownCounter(
+		"connection_status",
+		metric.WithUnit("1"),
+		metric.WithDescription("Current connection status (1=connected, 0=disconnected)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &metricsRegistry{
 		httpCallLatencies:           httpCallLatencies,
 		httpCallStatusCodes:         httpCallStatusCodes,
 		serverMessageReceivedByType: serverMessageReceivedByType,
+		connectionRetries:           connectionRetries,
+		connectionStatus:            connectionStatus,
 	}, nil
 }
 
@@ -64,6 +88,14 @@ func (m *metricsRegistry) HTTPCallStatusCodes() metric.Int64Counter {
 
 func (m *metricsRegistry) ServerMessageReceivedByType() metric.Int64Counter {
 	return m.serverMessageReceivedByType
+}
+
+func (m *metricsRegistry) ConnectionRetries() metric.Int64Counter {
+	return m.connectionRetries
+}
+
+func (m *metricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
+	return m.connectionStatus
 }
 
 type NoOpMetricsRegistry struct{}
@@ -84,5 +116,15 @@ func (m *NoOpMetricsRegistry) HTTPCallStatusCodes() metric.Int64Counter {
 
 func (m *NoOpMetricsRegistry) ServerMessageReceivedByType() metric.Int64Counter {
 	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("server_message_received_by_type")
+	return counter
+}
+
+func (m *NoOpMetricsRegistry) ConnectionRetries() metric.Int64Counter {
+	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("connection_retries")
+	return counter
+}
+
+func (m *NoOpMetricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
+	counter, _ := otel.GetMeterProvider().Meter("client").Int64UpDownCounter("connection_status")
 	return counter
 }

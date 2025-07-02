@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -58,23 +59,50 @@ func Module(
 		fx.Provide(fx.Annotate(noop.NewMeterProvider, fx.As(new(metric.MeterProvider)))),
 		fx.Provide(metrics.RegisterMetricsRegistry),
 		fx.Provide(NewClient),
-		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor) {
+		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor, l logging.Logger) {
+			var runCtx context.Context
+			var runCancel context.CancelFunc
+			var clientDone chan error
+
 			lc.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
 					if err := authInterceptor.ScheduleRefreshToken(); err != nil {
 						return err
 					}
 
+					runCtx, runCancel = context.WithCancel(context.Background())
+					clientDone = make(chan error, 1)
+
 					go func() {
-						err := client.Run(context.Background())
-						if err != nil && err != context.Canceled {
-							panic(err)
+						err := client.Run(runCtx)
+						if err != nil {
+							if err == context.Canceled {
+								l.Info("client stopped gracefully")
+							} else {
+								l.Errorf("client stopped with error: %v", err)
+							}
 						}
+						clientDone <- err
 					}()
 
 					return nil
 				},
 				OnStop: func(ctx context.Context) error {
+					l.Info("stopping stargate client...")
+
+					// Cancel the client context
+					runCancel()
+
+					// Wait for client to finish with timeout
+					select {
+					case err := <-clientDone:
+						if err != nil && err != context.Canceled {
+							l.Errorf("client error during shutdown: %v", err)
+						}
+					case <-time.After(30 * time.Second):
+						l.Error("timeout waiting for client to stop")
+					}
+
 					authInterceptor.Close()
 
 					return client.Close()

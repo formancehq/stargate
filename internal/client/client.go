@@ -3,7 +3,9 @@ package client
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -17,7 +19,9 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type WorkerPoolConfig struct {
@@ -40,6 +44,10 @@ type Config struct {
 	HTTPClientTimeout       time.Duration
 	HTTPMaxIdleConns        int
 	HTTPMaxIdleConnsPerHost int
+	MaxRetries              int
+	InitialRetryDelay       time.Duration
+	MaxRetryDelay           time.Duration
+	RetryMultiplier         float64
 }
 
 func NewClientConfig(
@@ -59,6 +67,10 @@ func NewClientConfig(
 		HTTPClientTimeout:       httpClientTimeout,
 		HTTPMaxIdleConns:        httpMaxIdleConns,
 		HTTPMaxIdleConnsPerHost: httpMaxIdleConnsPerHost,
+		MaxRetries:              5,
+		InitialRetryDelay:       time.Second,
+		MaxRetryDelay:           30 * time.Second,
+		RetryMultiplier:         2.0,
 	}
 }
 
@@ -106,6 +118,54 @@ type ResponseChanEvent struct {
 func (c *Client) Run(ctx context.Context) error {
 	c.logger.Info("starting client...")
 
+	retryCount := 0
+	for {
+		err := c.runStream(ctx)
+		if err == nil {
+			return nil
+		}
+
+		if ctx.Err() != nil {
+			c.logger.Info("context cancelled, stopping client")
+			return ctx.Err()
+		}
+
+		if !c.shouldRetry(err) {
+			c.logger.Errorf("non-retryable error occurred: %v", err)
+			return err
+		}
+
+		if retryCount >= c.config.MaxRetries {
+			c.logger.WithFields(map[string]any{
+				"max_retries": c.config.MaxRetries,
+			}).Error("max retries reached, giving up")
+			return fmt.Errorf("max retries (%d) reached: %w", c.config.MaxRetries, err)
+		}
+
+		retryCount++
+		delay := c.calculateBackoff(retryCount)
+
+		c.metricsRegistry.ConnectionRetries().Add(ctx, 1, metric.WithAttributes(
+			attribute.Int("retry_count", retryCount),
+			attribute.String("organization_id", c.config.OrganizationID),
+			attribute.String("stack_id", c.config.StackID),
+		))
+
+		c.logger.WithFields(map[string]any{
+			"retry_count": retryCount,
+			"delay":       delay,
+			"error":       err.Error(),
+		}).Info("connection lost, retrying...")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+func (c *Client) runStream(ctx context.Context) error {
 	ctx = metadata.AppendToOutgoingContext(
 		ctx,
 		"organization-id", c.config.OrganizationID,
@@ -126,10 +186,22 @@ func (c *Client) Run(ctx context.Context) error {
 		"organization_id": c.config.OrganizationID,
 		"stack_id":        c.config.StackID,
 	}).Info("connected to stargate server")
-	defer c.logger.WithFields(map[string]any{
-		"organization_id": c.config.OrganizationID,
-		"stack_id":        c.config.StackID,
-	}).Info("disconnected from stargate server")
+
+	c.metricsRegistry.ConnectionStatus().Add(ctx, 1, metric.WithAttributes(
+		attribute.String("organization_id", c.config.OrganizationID),
+		attribute.String("stack_id", c.config.StackID),
+	))
+
+	defer func() {
+		c.metricsRegistry.ConnectionStatus().Add(ctx, -1, metric.WithAttributes(
+			attribute.String("organization_id", c.config.OrganizationID),
+			attribute.String("stack_id", c.config.StackID),
+		))
+		c.logger.WithFields(map[string]any{
+			"organization_id": c.config.OrganizationID,
+			"stack_id":        c.config.StackID,
+		}).Info("disconnected from stargate server")
+	}()
 
 	responseChan := make(chan *ResponseChanEvent, c.config.ChanSize)
 	eg, ctx := errgroup.WithContext(ctx)
@@ -187,6 +259,32 @@ func (c *Client) Run(ctx context.Context) error {
 	})
 
 	return eg.Wait()
+}
+
+func (c *Client) shouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		return true
+	}
+
+	switch st.Code() {
+	case codes.Canceled, codes.InvalidArgument, codes.NotFound, codes.AlreadyExists, codes.PermissionDenied, codes.Unauthenticated:
+		return false
+	default:
+		return true
+	}
+}
+
+func (c *Client) calculateBackoff(retryCount int) time.Duration {
+	delay := float64(c.config.InitialRetryDelay) * math.Pow(c.config.RetryMultiplier, float64(retryCount-1))
+	if delay > float64(c.config.MaxRetryDelay) {
+		delay = float64(c.config.MaxRetryDelay)
+	}
+	return time.Duration(delay)
 }
 
 func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessage) *ResponseChanEvent {

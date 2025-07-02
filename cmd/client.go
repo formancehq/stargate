@@ -31,6 +31,11 @@ const (
 	HTTPClientMaxIdleConnsFlag        = "http-client-max-idle-conns"
 	HTTPClientMaxIdleConnsPerHostFlag = "http-client-max-idle-conns-per-host"
 
+	MaxRetriesFlag        = "max-retries"
+	InitialRetryDelayFlag = "initial-retry-delay"
+	MaxRetryDelayFlag     = "max-retry-delay"
+	RetryMultiplierFlag   = "retry-multiplier"
+
 	AuthRefreshTokenDurationBeforeExpireTimeFlag = "auth-refresh-token-duration-before-expire-time"
 	StargateAuthClientIDFlag                     = "stargate-auth-client-id"
 	StargateAuthClientSecretFlag                 = "stargate-auth-client-secret"
@@ -64,6 +69,10 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 	httpClientTimeout, _ := cmd.Flags().GetDuration(HTTPClientTimeoutFlag)
 	httpClientMaxIdleConns, _ := cmd.Flags().GetInt(HTTPClientMaxIdleConnsFlag)
 	httpClientMaxIdleConnsPerHost, _ := cmd.Flags().GetInt(HTTPClientMaxIdleConnsPerHostFlag)
+	maxRetries, _ := cmd.Flags().GetInt(MaxRetriesFlag)
+	initialRetryDelay, _ := cmd.Flags().GetDuration(InitialRetryDelayFlag)
+	maxRetryDelay, _ := cmd.Flags().GetDuration(MaxRetryDelayFlag)
+	retryMultiplier, _ := cmd.Flags().GetFloat64(RetryMultiplierFlag)
 	stargateAuthIssuerURL, _ := cmd.Flags().GetString(StargateAuthIssuerURLFlag)
 	authRefreshTokenDuration, _ := cmd.Flags().GetDuration(AuthRefreshTokenDurationBeforeExpireTimeFlag)
 	stargateAuthClientID, _ := cmd.Flags().GetString(StargateAuthClientIDFlag)
@@ -85,7 +94,7 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 			)
 		}),
 		fx.Provide(func() client.Config {
-			return client.NewClientConfig(
+			config := client.NewClientConfig(
 				organizationID,
 				stackID,
 				clientChanSize,
@@ -94,6 +103,19 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 				httpClientMaxIdleConns,
 				httpClientMaxIdleConnsPerHost,
 			)
+			if maxRetries > 0 {
+				config.MaxRetries = maxRetries
+			}
+			if initialRetryDelay > 0 {
+				config.InitialRetryDelay = initialRetryDelay
+			}
+			if maxRetryDelay > 0 {
+				config.MaxRetryDelay = maxRetryDelay
+			}
+			if retryMultiplier > 0 {
+				config.RetryMultiplier = retryMultiplier
+			}
+			return config
 		}),
 
 		fx.Provide(func() interceptors.Config {
