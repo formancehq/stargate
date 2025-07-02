@@ -2,6 +2,7 @@ package interceptors
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -115,7 +116,7 @@ func (a *AuthInterceptor) ScheduleRefreshToken() error {
 func (a *AuthInterceptor) refreshToken() (time.Time, error) {
 	discoveryConfiguration, err := client.Discover(a.config.endpoint, a.httpClient)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, fmt.Errorf("cannot discover endpoint: %w", err)
 	}
 
 	config := clientcredentials.Config{
