@@ -91,7 +91,7 @@ type Client struct {
 
 	workerPool      *pond.WorkerPool
 	metricsRegistry metrics.MetricsRegistry
-	
+
 	// gRPC connection parameters
 	serverURL             string
 	tlsEnabled            bool
