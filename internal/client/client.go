@@ -3,6 +3,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"math"
@@ -19,7 +21,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
@@ -74,6 +79,10 @@ func NewClientConfig(
 	}
 }
 
+type StreamInterceptor interface {
+	StreamClientInterceptor() grpc.StreamClientInterceptor
+}
+
 type Client struct {
 	logger         logging.Logger
 	config         Config
@@ -82,14 +91,26 @@ type Client struct {
 
 	workerPool      *pond.WorkerPool
 	metricsRegistry metrics.MetricsRegistry
+	
+	// gRPC connection parameters
+	serverURL             string
+	tlsEnabled            bool
+	tlsCACertificate      string
+	tlsInsecureSkipVerify bool
+	authInterceptor       StreamInterceptor
+	grpcConn              *grpc.ClientConn
 }
 
 func NewClient(
 	l logging.Logger,
-	stargateClient generated.StargateServiceClient,
 	clientConfig Config,
 	workerPoolConfig WorkerPoolConfig,
 	metricsRegistry metrics.MetricsRegistry,
+	serverURL string,
+	tlsEnabled bool,
+	tlsCACertificate string,
+	tlsInsecureSkipVerify bool,
+	authInterceptor StreamInterceptor,
 ) *Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConns = clientConfig.HTTPMaxIdleConns
@@ -98,11 +119,15 @@ func NewClient(
 	clientConfig.GatewayUrl = strings.TrimSuffix(clientConfig.GatewayUrl, "/")
 
 	return &Client{
-		logger:          l,
-		stargateClient:  stargateClient,
-		config:          clientConfig,
-		workerPool:      pond.New(workerPoolConfig.MaxWorkers, workerPoolConfig.MaxTasks),
-		metricsRegistry: metricsRegistry,
+		logger:                l,
+		config:                clientConfig,
+		workerPool:            pond.New(workerPoolConfig.MaxWorkers, workerPoolConfig.MaxTasks),
+		metricsRegistry:       metricsRegistry,
+		serverURL:             serverURL,
+		tlsEnabled:            tlsEnabled,
+		tlsCACertificate:      tlsCACertificate,
+		tlsInsecureSkipVerify: tlsInsecureSkipVerify,
+		authInterceptor:       authInterceptor,
 		httpClient: &http.Client{
 			Timeout:   clientConfig.HTTPClientTimeout,
 			Transport: transport,
@@ -113,6 +138,57 @@ func NewClient(
 type ResponseChanEvent struct {
 	msg *generated.StargateClientMessage
 	err error
+}
+
+func (c *Client) createGRPCConnection() error {
+	var credential credentials.TransportCredentials
+	if !c.tlsEnabled {
+		c.logger.Infof("TLS not enabled")
+		credential = insecure.NewCredentials()
+	} else {
+		var certPool *x509.CertPool
+		if c.tlsCACertificate != "" {
+			certPool = x509.NewCertPool()
+			c.logger.Infof("Load server certificate from config")
+			if !certPool.AppendCertsFromPEM([]byte(c.tlsCACertificate)) {
+				return fmt.Errorf("failed to add server CA's certificate")
+			}
+		} else {
+			var err error
+			certPool, err = x509.SystemCertPool()
+			if err != nil {
+				return err
+			}
+		}
+
+		if c.tlsInsecureSkipVerify {
+			c.logger.Infof("Disable certificate checks")
+		}
+
+		credential = credentials.NewTLS(&tls.Config{
+			InsecureSkipVerify: c.tlsInsecureSkipVerify,
+			RootCAs:            certPool,
+		})
+	}
+
+	// Close existing connection if any
+	if c.grpcConn != nil {
+		c.grpcConn.Close()
+	}
+
+	conn, err := grpc.Dial(
+		c.serverURL,
+		grpc.WithStreamInterceptor(c.authInterceptor.StreamClientInterceptor()),
+		grpc.WithTransportCredentials(credential),
+	)
+	if err != nil {
+		c.logger.Errorf("failed to connect to stargate server '%s': %s", c.serverURL, err)
+		return err
+	}
+
+	c.grpcConn = conn
+	c.stargateClient = generated.NewStargateServiceClient(conn)
+	return nil
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -157,6 +233,12 @@ func (c *Client) Run(ctx context.Context) error {
 			"error":       err.Error(),
 		}).Info("connection lost, retrying...")
 
+		// Force reconnection on next attempt
+		if c.grpcConn != nil {
+			c.grpcConn.Close()
+			c.grpcConn = nil
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -166,6 +248,13 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) runStream(ctx context.Context) error {
+	// Create or recreate gRPC connection if needed
+	if c.grpcConn == nil {
+		if err := c.createGRPCConnection(); err != nil {
+			return fmt.Errorf("failed to create gRPC connection: %w", err)
+		}
+	}
+
 	ctx = metadata.AppendToOutgoingContext(
 		ctx,
 		"organization-id", c.config.OrganizationID,
@@ -391,5 +480,8 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 
 func (c *Client) Close() error {
 	c.workerPool.StopAndWait()
+	if c.grpcConn != nil {
+		c.grpcConn.Close()
+	}
 	return nil
 }

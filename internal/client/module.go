@@ -53,12 +53,27 @@ func Module(
 		}),
 
 		fx.Provide(interceptors.NewAuthInterceptor),
-		fx.Provide(func(l logging.Logger, authInterceptor *interceptors.AuthInterceptor) (generated.StargateServiceClient, error) {
-			return newGrpcClient(l, serverURL, tlsEnabled, tlsCACertificate, tlsInsecureSkipVerify, authInterceptor)
-		}),
 		fx.Provide(fx.Annotate(noop.NewMeterProvider, fx.As(new(metric.MeterProvider)))),
 		fx.Provide(metrics.RegisterMetricsRegistry),
-		fx.Provide(NewClient),
+		fx.Provide(func(
+			l logging.Logger,
+			clientConfig Config,
+			workerPoolConfig WorkerPoolConfig,
+			metricsRegistry metrics.MetricsRegistry,
+			authInterceptor *interceptors.AuthInterceptor,
+		) *Client {
+			return NewClient(
+				l,
+				clientConfig,
+				workerPoolConfig,
+				metricsRegistry,
+				serverURL,
+				tlsEnabled,
+				tlsCACertificate,
+				tlsInsecureSkipVerify,
+				authInterceptor,
+			)
+		}),
 		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor, l logging.Logger) {
 			var runCtx context.Context
 			var runCancel context.CancelFunc
