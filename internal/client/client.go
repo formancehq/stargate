@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -207,14 +208,37 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		if !c.shouldRetry(err) {
-			c.logger.Errorf("non-retryable error occurred: %v", err)
+			// Extract gRPC status for better error context
+			if st, ok := status.FromError(err); ok {
+				c.logger.WithFields(map[string]any{
+					"error_code":    st.Code().String(),
+					"error_message": st.Message(),
+					"error_details": st.Details(),
+				}).Error("non-retryable gRPC error occurred")
+			} else {
+				c.logger.WithFields(map[string]any{
+					"error_type": fmt.Sprintf("%T", err),
+					"error":      err.Error(),
+				}).Error("non-retryable error occurred")
+			}
 			return err
 		}
 
 		if retryCount >= c.config.MaxRetries {
-			c.logger.WithFields(map[string]any{
-				"max_retries": c.config.MaxRetries,
-			}).Error("max retries reached, giving up")
+			logFields := map[string]any{
+				"max_retries":   c.config.MaxRetries,
+				"total_elapsed": time.Duration(retryCount) * c.config.InitialRetryDelay,
+			}
+
+			if st, ok := status.FromError(err); ok {
+				logFields["last_error_code"] = st.Code().String()
+				logFields["last_error_message"] = st.Message()
+			} else {
+				logFields["last_error"] = err.Error()
+				logFields["last_error_type"] = fmt.Sprintf("%T", err)
+			}
+
+			c.logger.WithFields(logFields).Error("max retries reached, giving up")
 			return fmt.Errorf("max retries (%d) reached: %w", c.config.MaxRetries, err)
 		}
 
@@ -227,11 +251,23 @@ func (c *Client) Run(ctx context.Context) error {
 			attribute.String("stack_id", c.config.StackID),
 		))
 
-		c.logger.WithFields(map[string]any{
-			"retry_count": retryCount,
-			"delay":       delay,
-			"error":       err.Error(),
-		}).Info("connection lost, retrying...")
+		// Log with more context about the error
+		logFields := map[string]any{
+			"retry_count":   retryCount,
+			"delay":         delay,
+			"max_retries":   c.config.MaxRetries,
+			"next_retry_in": delay.String(),
+		}
+
+		if st, ok := status.FromError(err); ok {
+			logFields["error_code"] = st.Code().String()
+			logFields["error_message"] = st.Message()
+		} else {
+			logFields["error"] = err.Error()
+			logFields["error_type"] = fmt.Sprintf("%T", err)
+		}
+
+		c.logger.WithFields(logFields).Info("connection lost, retrying...")
 
 		// Force reconnection on next attempt
 		if c.grpcConn != nil {
@@ -369,11 +405,22 @@ func (c *Client) shouldRetry(err error) bool {
 }
 
 func (c *Client) calculateBackoff(retryCount int) time.Duration {
-	delay := float64(c.config.InitialRetryDelay) * math.Pow(c.config.RetryMultiplier, float64(retryCount-1))
-	if delay > float64(c.config.MaxRetryDelay) {
-		delay = float64(c.config.MaxRetryDelay)
+	baseDelay := float64(c.config.InitialRetryDelay) * math.Pow(c.config.RetryMultiplier, float64(retryCount-1))
+	if baseDelay > float64(c.config.MaxRetryDelay) {
+		baseDelay = float64(c.config.MaxRetryDelay)
 	}
-	return time.Duration(delay)
+
+	// Add jitter: ±20% of the base delay
+	jitterFactor := 0.2
+	jitter := baseDelay * jitterFactor * (rand.Float64()*2 - 1) // Random value between -0.2 and +0.2
+	finalDelay := baseDelay + jitter
+
+	// Ensure delay doesn't go below 0
+	if finalDelay < 0 {
+		finalDelay = 0
+	}
+
+	return time.Duration(finalDelay)
 }
 
 func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessage) *ResponseChanEvent {

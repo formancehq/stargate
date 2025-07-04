@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/formancehq/go-libs/licence"
 	"github.com/formancehq/go-libs/otlp/otlpmetrics"
 	"github.com/formancehq/go-libs/otlp/otlptraces"
@@ -51,12 +54,41 @@ func newClient() *cobra.Command {
 		Short:        "Launch client",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.New(cmd.OutOrStdout(), resolveClientOptions(cmd)...).Run(cmd)
+			options, err := resolveClientOptions(cmd)
+			if err != nil {
+				return err
+			}
+			return app.New(cmd.OutOrStdout(), options...).Run(cmd)
 		},
 	}
 }
 
-func resolveClientOptions(cmd *cobra.Command) []fx.Option {
+func validateRetryConfig(maxRetries int, initialRetryDelay, maxRetryDelay time.Duration, retryMultiplier float64) error {
+	if maxRetries < 0 {
+		return fmt.Errorf("max-retries must be non-negative, got %d", maxRetries)
+	}
+
+	if initialRetryDelay < 0 {
+		return fmt.Errorf("initial-retry-delay must be non-negative, got %v", initialRetryDelay)
+	}
+
+	if maxRetryDelay < 0 {
+		return fmt.Errorf("max-retry-delay must be non-negative, got %v", maxRetryDelay)
+	}
+
+	if maxRetryDelay > 0 && initialRetryDelay > 0 && maxRetryDelay < initialRetryDelay {
+		return fmt.Errorf("max-retry-delay (%v) must be greater than or equal to initial-retry-delay (%v)",
+			maxRetryDelay, initialRetryDelay)
+	}
+
+	if retryMultiplier < 1.0 {
+		return fmt.Errorf("retry-multiplier must be >= 1.0, got %f", retryMultiplier)
+	}
+
+	return nil
+}
+
+func resolveClientOptions(cmd *cobra.Command) ([]fx.Option, error) {
 	options := make([]fx.Option, 0)
 	options = append(options, fx.NopLogger)
 
@@ -82,6 +114,11 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 	tlsEnabled, _ := cmd.Flags().GetBool(TlsEnabledFlag)
 	tlsCaCert, _ := cmd.Flags().GetString(TlsCACertificateFlag)
 	tlsInsecureSkipVerify, _ := cmd.Flags().GetBool(TlsInsecureSkipVerifyFlag)
+
+	// Validate retry configuration
+	if err := validateRetryConfig(maxRetries, initialRetryDelay, maxRetryDelay, retryMultiplier); err != nil {
+		return nil, err
+	}
 
 	options = append(options,
 		otlptraces.FXModuleFromFlags(cmd),
@@ -139,5 +176,5 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 		),
 	)
 
-	return options
+	return options, nil
 }
