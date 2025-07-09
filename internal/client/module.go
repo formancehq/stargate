@@ -2,9 +2,7 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"fmt"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -14,15 +12,11 @@ import (
 	"github.com/formancehq/stack/ee/stargate/internal/client/controllers"
 	"github.com/formancehq/stack/ee/stargate/internal/client/interceptors"
 	"github.com/formancehq/stack/ee/stargate/internal/client/routes"
-	"github.com/formancehq/stack/ee/stargate/internal/generated"
 	metrics "github.com/formancehq/stack/ee/stargate/internal/grpcmetrics"
 	"github.com/formancehq/stack/ee/stargate/internal/middlewares"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/fx"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 func Module(
@@ -52,29 +46,71 @@ func Module(
 		}),
 
 		fx.Provide(interceptors.NewAuthInterceptor),
-		fx.Provide(func(l logging.Logger, authInterceptor *interceptors.AuthInterceptor) (generated.StargateServiceClient, error) {
-			return newGrpcClient(l, serverURL, tlsEnabled, tlsCACertificate, tlsInsecureSkipVerify, authInterceptor)
-		}),
 		fx.Provide(fx.Annotate(noop.NewMeterProvider, fx.As(new(metric.MeterProvider)))),
 		fx.Provide(metrics.RegisterMetricsRegistry),
-		fx.Provide(NewClient),
-		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor) {
+		fx.Provide(func(
+			l logging.Logger,
+			clientConfig Config,
+			workerPoolConfig WorkerPoolConfig,
+			metricsRegistry metrics.MetricsRegistry,
+			authInterceptor *interceptors.AuthInterceptor,
+		) *Client {
+			return NewClient(
+				l,
+				clientConfig,
+				workerPoolConfig,
+				metricsRegistry,
+				serverURL,
+				tlsEnabled,
+				tlsCACertificate,
+				tlsInsecureSkipVerify,
+				authInterceptor,
+			)
+		}),
+		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor, l logging.Logger) {
+			var runCtx context.Context
+			var runCancel context.CancelFunc
+			var clientDone chan error
+
 			lc.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
 					if err := authInterceptor.ScheduleRefreshToken(); err != nil {
 						return err
 					}
 
+					runCtx, runCancel = context.WithCancel(context.Background())
+					clientDone = make(chan error, 1)
+
 					go func() {
-						err := client.Run(context.Background())
-						if err != nil && err != context.Canceled {
-							panic(err)
+						err := client.Run(runCtx)
+						if err != nil {
+							if err == context.Canceled {
+								l.Info("client stopped gracefully")
+							} else {
+								l.Errorf("client stopped with error: %v", err)
+							}
 						}
+						clientDone <- err
 					}()
 
 					return nil
 				},
 				OnStop: func(ctx context.Context) error {
+					l.Info("stopping stargate client...")
+
+					// Cancel the client context
+					runCancel()
+
+					// Wait for client to finish with timeout
+					select {
+					case err := <-clientDone:
+						if err != nil && err != context.Canceled {
+							l.Errorf("client error during shutdown: %v", err)
+						}
+					case <-time.After(30 * time.Second):
+						l.Error("timeout waiting for client to stop")
+					}
+
 					authInterceptor.Close()
 
 					return client.Close()
@@ -84,55 +120,4 @@ func Module(
 	)
 
 	return fx.Options(options...)
-}
-
-func newGrpcClient(
-	logger logging.Logger,
-	serverURL string,
-	tlsEnabled bool,
-	tlsCACertificate string,
-	tlsInsecureSkipVerify bool,
-	authInterceptors *interceptors.AuthInterceptor,
-) (generated.StargateServiceClient, error) {
-	var credential credentials.TransportCredentials
-	if !tlsEnabled {
-		logger.Infof("TLS not enabled")
-		credential = insecure.NewCredentials()
-	} else {
-		var certPool *x509.CertPool
-		if tlsCACertificate != "" {
-			certPool := x509.NewCertPool()
-			logger.Infof("Load server certificate from config")
-			if !certPool.AppendCertsFromPEM([]byte(tlsCACertificate)) {
-				return nil, fmt.Errorf("failed to add server CA's certificate")
-			}
-		} else {
-			var err error
-			certPool, err = x509.SystemCertPool()
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		if tlsInsecureSkipVerify {
-			logger.Infof("Disable certificate checks")
-		}
-
-		credential = credentials.NewTLS(&tls.Config{
-			InsecureSkipVerify: tlsInsecureSkipVerify,
-			RootCAs:            certPool,
-		})
-	}
-
-	conn, err := grpc.Dial(
-		serverURL,
-		grpc.WithStreamInterceptor(authInterceptors.StreamClientInterceptor()),
-		grpc.WithTransportCredentials(credential),
-	)
-	if err != nil {
-		logger.Errorf("failed to connect to stargate server '%s': %s", serverURL, err)
-		return nil, err
-	}
-
-	return generated.NewStargateServiceClient(conn), nil
 }

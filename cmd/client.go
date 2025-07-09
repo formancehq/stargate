@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/formancehq/go-libs/licence"
 	"github.com/formancehq/go-libs/otlp/otlpmetrics"
 	"github.com/formancehq/go-libs/otlp/otlptraces"
@@ -31,6 +34,11 @@ const (
 	HTTPClientMaxIdleConnsFlag        = "http-client-max-idle-conns"
 	HTTPClientMaxIdleConnsPerHostFlag = "http-client-max-idle-conns-per-host"
 
+	MaxRetriesFlag        = "max-retries"
+	InitialRetryDelayFlag = "initial-retry-delay"
+	MaxRetryDelayFlag     = "max-retry-delay"
+	RetryMultiplierFlag   = "retry-multiplier"
+
 	AuthRefreshTokenDurationBeforeExpireTimeFlag = "auth-refresh-token-duration-before-expire-time"
 	StargateAuthClientIDFlag                     = "stargate-auth-client-id"
 	StargateAuthClientSecretFlag                 = "stargate-auth-client-secret"
@@ -46,12 +54,41 @@ func newClient() *cobra.Command {
 		Short:        "Launch client",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.New(cmd.OutOrStdout(), resolveClientOptions(cmd)...).Run(cmd)
+			options, err := resolveClientOptions(cmd)
+			if err != nil {
+				return err
+			}
+			return app.New(cmd.OutOrStdout(), options...).Run(cmd)
 		},
 	}
 }
 
-func resolveClientOptions(cmd *cobra.Command) []fx.Option {
+func validateRetryConfig(maxRetries int, initialRetryDelay, maxRetryDelay time.Duration, retryMultiplier float64) error {
+	if maxRetries < 0 {
+		return fmt.Errorf("max-retries must be non-negative, got %d", maxRetries)
+	}
+
+	if initialRetryDelay < 0 {
+		return fmt.Errorf("initial-retry-delay must be non-negative, got %v", initialRetryDelay)
+	}
+
+	if maxRetryDelay < 0 {
+		return fmt.Errorf("max-retry-delay must be non-negative, got %v", maxRetryDelay)
+	}
+
+	if maxRetryDelay > 0 && initialRetryDelay > 0 && maxRetryDelay < initialRetryDelay {
+		return fmt.Errorf("max-retry-delay (%v) must be greater than or equal to initial-retry-delay (%v)",
+			maxRetryDelay, initialRetryDelay)
+	}
+
+	if retryMultiplier < 1.0 {
+		return fmt.Errorf("retry-multiplier must be >= 1.0, got %f", retryMultiplier)
+	}
+
+	return nil
+}
+
+func resolveClientOptions(cmd *cobra.Command) ([]fx.Option, error) {
 	options := make([]fx.Option, 0)
 	options = append(options, fx.NopLogger)
 
@@ -64,6 +101,10 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 	httpClientTimeout, _ := cmd.Flags().GetDuration(HTTPClientTimeoutFlag)
 	httpClientMaxIdleConns, _ := cmd.Flags().GetInt(HTTPClientMaxIdleConnsFlag)
 	httpClientMaxIdleConnsPerHost, _ := cmd.Flags().GetInt(HTTPClientMaxIdleConnsPerHostFlag)
+	maxRetries, _ := cmd.Flags().GetInt(MaxRetriesFlag)
+	initialRetryDelay, _ := cmd.Flags().GetDuration(InitialRetryDelayFlag)
+	maxRetryDelay, _ := cmd.Flags().GetDuration(MaxRetryDelayFlag)
+	retryMultiplier, _ := cmd.Flags().GetFloat64(RetryMultiplierFlag)
 	stargateAuthIssuerURL, _ := cmd.Flags().GetString(StargateAuthIssuerURLFlag)
 	authRefreshTokenDuration, _ := cmd.Flags().GetDuration(AuthRefreshTokenDurationBeforeExpireTimeFlag)
 	stargateAuthClientID, _ := cmd.Flags().GetString(StargateAuthClientIDFlag)
@@ -73,6 +114,11 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 	tlsEnabled, _ := cmd.Flags().GetBool(TlsEnabledFlag)
 	tlsCaCert, _ := cmd.Flags().GetString(TlsCACertificateFlag)
 	tlsInsecureSkipVerify, _ := cmd.Flags().GetBool(TlsInsecureSkipVerifyFlag)
+
+	// Validate retry configuration
+	if err := validateRetryConfig(maxRetries, initialRetryDelay, maxRetryDelay, retryMultiplier); err != nil {
+		return nil, err
+	}
 
 	options = append(options,
 		otlptraces.FXModuleFromFlags(cmd),
@@ -85,7 +131,7 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 			)
 		}),
 		fx.Provide(func() client.Config {
-			return client.NewClientConfig(
+			config := client.NewClientConfig(
 				organizationID,
 				stackID,
 				clientChanSize,
@@ -94,6 +140,19 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 				httpClientMaxIdleConns,
 				httpClientMaxIdleConnsPerHost,
 			)
+			if maxRetries > 0 {
+				config.MaxRetries = maxRetries
+			}
+			if initialRetryDelay > 0 {
+				config.InitialRetryDelay = initialRetryDelay
+			}
+			if maxRetryDelay > 0 {
+				config.MaxRetryDelay = maxRetryDelay
+			}
+			if retryMultiplier > 0 {
+				config.RetryMultiplier = retryMultiplier
+			}
+			return config
 		}),
 
 		fx.Provide(func() interceptors.Config {
@@ -117,5 +176,5 @@ func resolveClientOptions(cmd *cobra.Command) []fx.Option {
 		),
 	)
 
-	return options
+	return options, nil
 }

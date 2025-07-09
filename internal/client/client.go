@@ -3,7 +3,12 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -17,7 +22,12 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type WorkerPoolConfig struct {
@@ -40,6 +50,10 @@ type Config struct {
 	HTTPClientTimeout       time.Duration
 	HTTPMaxIdleConns        int
 	HTTPMaxIdleConnsPerHost int
+	MaxRetries              int
+	InitialRetryDelay       time.Duration
+	MaxRetryDelay           time.Duration
+	RetryMultiplier         float64
 }
 
 func NewClientConfig(
@@ -59,7 +73,15 @@ func NewClientConfig(
 		HTTPClientTimeout:       httpClientTimeout,
 		HTTPMaxIdleConns:        httpMaxIdleConns,
 		HTTPMaxIdleConnsPerHost: httpMaxIdleConnsPerHost,
+		MaxRetries:              5,
+		InitialRetryDelay:       time.Second,
+		MaxRetryDelay:           30 * time.Second,
+		RetryMultiplier:         2.0,
 	}
+}
+
+type StreamInterceptor interface {
+	StreamClientInterceptor() grpc.StreamClientInterceptor
 }
 
 type Client struct {
@@ -70,14 +92,26 @@ type Client struct {
 
 	workerPool      *pond.WorkerPool
 	metricsRegistry metrics.MetricsRegistry
+
+	// gRPC connection parameters
+	serverURL             string
+	tlsEnabled            bool
+	tlsCACertificate      string
+	tlsInsecureSkipVerify bool
+	authInterceptor       StreamInterceptor
+	grpcConn              *grpc.ClientConn
 }
 
 func NewClient(
 	l logging.Logger,
-	stargateClient generated.StargateServiceClient,
 	clientConfig Config,
 	workerPoolConfig WorkerPoolConfig,
 	metricsRegistry metrics.MetricsRegistry,
+	serverURL string,
+	tlsEnabled bool,
+	tlsCACertificate string,
+	tlsInsecureSkipVerify bool,
+	authInterceptor StreamInterceptor,
 ) *Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConns = clientConfig.HTTPMaxIdleConns
@@ -86,11 +120,15 @@ func NewClient(
 	clientConfig.GatewayUrl = strings.TrimSuffix(clientConfig.GatewayUrl, "/")
 
 	return &Client{
-		logger:          l,
-		stargateClient:  stargateClient,
-		config:          clientConfig,
-		workerPool:      pond.New(workerPoolConfig.MaxWorkers, workerPoolConfig.MaxTasks),
-		metricsRegistry: metricsRegistry,
+		logger:                l,
+		config:                clientConfig,
+		workerPool:            pond.New(workerPoolConfig.MaxWorkers, workerPoolConfig.MaxTasks),
+		metricsRegistry:       metricsRegistry,
+		serverURL:             serverURL,
+		tlsEnabled:            tlsEnabled,
+		tlsCACertificate:      tlsCACertificate,
+		tlsInsecureSkipVerify: tlsInsecureSkipVerify,
+		authInterceptor:       authInterceptor,
 		httpClient: &http.Client{
 			Timeout:   clientConfig.HTTPClientTimeout,
 			Transport: transport,
@@ -103,8 +141,155 @@ type ResponseChanEvent struct {
 	err error
 }
 
+func (c *Client) createGRPCConnection() error {
+	var credential credentials.TransportCredentials
+	if !c.tlsEnabled {
+		c.logger.Infof("TLS not enabled")
+		credential = insecure.NewCredentials()
+	} else {
+		var certPool *x509.CertPool
+		if c.tlsCACertificate != "" {
+			certPool = x509.NewCertPool()
+			c.logger.Infof("Load server certificate from config")
+			if !certPool.AppendCertsFromPEM([]byte(c.tlsCACertificate)) {
+				return fmt.Errorf("failed to add server CA's certificate")
+			}
+		} else {
+			var err error
+			certPool, err = x509.SystemCertPool()
+			if err != nil {
+				return err
+			}
+		}
+
+		if c.tlsInsecureSkipVerify {
+			c.logger.Infof("Disable certificate checks")
+		}
+
+		credential = credentials.NewTLS(&tls.Config{
+			InsecureSkipVerify: c.tlsInsecureSkipVerify,
+			RootCAs:            certPool,
+		})
+	}
+
+	// Close existing connection if any
+	if c.grpcConn != nil {
+		c.grpcConn.Close()
+	}
+
+	conn, err := grpc.Dial(
+		c.serverURL,
+		grpc.WithStreamInterceptor(c.authInterceptor.StreamClientInterceptor()),
+		grpc.WithTransportCredentials(credential),
+	)
+	if err != nil {
+		c.logger.Errorf("failed to connect to stargate server '%s': %s", c.serverURL, err)
+		return err
+	}
+
+	c.grpcConn = conn
+	c.stargateClient = generated.NewStargateServiceClient(conn)
+	return nil
+}
+
 func (c *Client) Run(ctx context.Context) error {
 	c.logger.Info("starting client...")
+
+	retryCount := 0
+	for {
+		err := c.runStream(ctx)
+		if err == nil {
+			return nil
+		}
+
+		if ctx.Err() != nil {
+			c.logger.Info("context cancelled, stopping client")
+			return ctx.Err()
+		}
+
+		if !c.shouldRetry(err) {
+			// Extract gRPC status for better error context
+			if st, ok := status.FromError(err); ok {
+				c.logger.WithFields(map[string]any{
+					"error_code":    st.Code().String(),
+					"error_message": st.Message(),
+					"error_details": st.Details(),
+				}).Error("non-retryable gRPC error occurred")
+			} else {
+				c.logger.WithFields(map[string]any{
+					"error_type": fmt.Sprintf("%T", err),
+					"error":      err.Error(),
+				}).Error("non-retryable error occurred")
+			}
+			return err
+		}
+
+		if retryCount >= c.config.MaxRetries {
+			logFields := map[string]any{
+				"max_retries":   c.config.MaxRetries,
+				"total_elapsed": time.Duration(retryCount) * c.config.InitialRetryDelay,
+			}
+
+			if st, ok := status.FromError(err); ok {
+				logFields["last_error_code"] = st.Code().String()
+				logFields["last_error_message"] = st.Message()
+			} else {
+				logFields["last_error"] = err.Error()
+				logFields["last_error_type"] = fmt.Sprintf("%T", err)
+			}
+
+			c.logger.WithFields(logFields).Error("max retries reached, giving up")
+			return fmt.Errorf("max retries (%d) reached: %w", c.config.MaxRetries, err)
+		}
+
+		retryCount++
+		delay := c.calculateBackoff(retryCount)
+
+		c.metricsRegistry.ConnectionRetries().Add(ctx, 1, metric.WithAttributes(
+			attribute.Int("retry_count", retryCount),
+			attribute.String("organization_id", c.config.OrganizationID),
+			attribute.String("stack_id", c.config.StackID),
+		))
+
+		// Log with more context about the error
+		logFields := map[string]any{
+			"retry_count":   retryCount,
+			"delay":         delay,
+			"max_retries":   c.config.MaxRetries,
+			"next_retry_in": delay.String(),
+		}
+
+		if st, ok := status.FromError(err); ok {
+			logFields["error_code"] = st.Code().String()
+			logFields["error_message"] = st.Message()
+		} else {
+			logFields["error"] = err.Error()
+			logFields["error_type"] = fmt.Sprintf("%T", err)
+		}
+
+		c.logger.WithFields(logFields).Info("connection lost, retrying...")
+
+		// Force reconnection on next attempt
+		if c.grpcConn != nil {
+			c.grpcConn.Close()
+			c.grpcConn = nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+func (c *Client) runStream(ctx context.Context) error {
+	// Create or recreate gRPC connection if needed
+	if c.grpcConn == nil {
+		if err := c.createGRPCConnection(); err != nil {
+			return fmt.Errorf("failed to create gRPC connection: %w", err)
+		}
+	}
 
 	ctx = metadata.AppendToOutgoingContext(
 		ctx,
@@ -126,10 +311,22 @@ func (c *Client) Run(ctx context.Context) error {
 		"organization_id": c.config.OrganizationID,
 		"stack_id":        c.config.StackID,
 	}).Info("connected to stargate server")
-	defer c.logger.WithFields(map[string]any{
-		"organization_id": c.config.OrganizationID,
-		"stack_id":        c.config.StackID,
-	}).Info("disconnected from stargate server")
+
+	c.metricsRegistry.ConnectionStatus().Add(ctx, 1, metric.WithAttributes(
+		attribute.String("organization_id", c.config.OrganizationID),
+		attribute.String("stack_id", c.config.StackID),
+	))
+
+	defer func() {
+		c.metricsRegistry.ConnectionStatus().Add(ctx, -1, metric.WithAttributes(
+			attribute.String("organization_id", c.config.OrganizationID),
+			attribute.String("stack_id", c.config.StackID),
+		))
+		c.logger.WithFields(map[string]any{
+			"organization_id": c.config.OrganizationID,
+			"stack_id":        c.config.StackID,
+		}).Info("disconnected from stargate server")
+	}()
 
 	responseChan := make(chan *ResponseChanEvent, c.config.ChanSize)
 	eg, ctx := errgroup.WithContext(ctx)
@@ -187,6 +384,43 @@ func (c *Client) Run(ctx context.Context) error {
 	})
 
 	return eg.Wait()
+}
+
+func (c *Client) shouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		return true
+	}
+
+	switch st.Code() {
+	case codes.Canceled, codes.InvalidArgument, codes.NotFound, codes.AlreadyExists, codes.PermissionDenied, codes.Unauthenticated:
+		return false
+	default:
+		return true
+	}
+}
+
+func (c *Client) calculateBackoff(retryCount int) time.Duration {
+	baseDelay := float64(c.config.InitialRetryDelay) * math.Pow(c.config.RetryMultiplier, float64(retryCount-1))
+	if baseDelay > float64(c.config.MaxRetryDelay) {
+		baseDelay = float64(c.config.MaxRetryDelay)
+	}
+
+	// Add jitter: ±20% of the base delay
+	jitterFactor := 0.2
+	jitter := baseDelay * jitterFactor * (rand.Float64()*2 - 1) // Random value between -0.2 and +0.2
+	finalDelay := baseDelay + jitter
+
+	// Ensure delay doesn't go below 0
+	if finalDelay < 0 {
+		finalDelay = 0
+	}
+
+	return time.Duration(finalDelay)
 }
 
 func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessage) *ResponseChanEvent {
@@ -293,5 +527,8 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 
 func (c *Client) Close() error {
 	c.workerPool.StopAndWait()
+	if c.grpcConn != nil {
+		c.grpcConn.Close()
+	}
 	return nil
 }
