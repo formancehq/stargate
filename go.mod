@@ -23,7 +23,6 @@ require (
 
 require (
 	github.com/ThreeDotsLabs/watermill v1.4.7 // indirect
-	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.2 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/ebitengine/purego v0.8.4 // indirect
