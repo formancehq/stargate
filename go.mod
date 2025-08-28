@@ -1,13 +1,13 @@
 module github.com/formancehq/stack/ee/stargate
 
-go 1.22.0
+go 1.23
 
-toolchain go1.22.7
+toolchain go1.24.6
 
 require (
 	github.com/alitto/pond v1.9.2
 	github.com/formancehq/go-libs v1.7.2
-	github.com/go-chi/chi/v5 v5.2.2
+	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.2
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.8.1
@@ -18,7 +18,7 @@ require (
 	golang.org/x/oauth2 v0.25.0
 	golang.org/x/sync v0.10.0
 	google.golang.org/grpc v1.70.0
-	google.golang.org/protobuf v1.36.6
+	google.golang.org/protobuf v1.36.8
 )
 
 require (
