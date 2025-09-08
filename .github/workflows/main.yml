@@ -65,7 +65,8 @@ jobs:
         uses: ./.github/actions/env
         with:
           token: ${{ secrets.NUMARY_GITHUB_TOKEN }}
-      - run: >
+      - shell: bash
+        run: >
           earthly
           --no-output
           --allow-privileged
