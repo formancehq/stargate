@@ -7,6 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	runtimedebug "runtime/debug"
+
 	"github.com/formancehq/go-libs/health"
 	"github.com/formancehq/go-libs/httpserver"
 	"github.com/formancehq/go-libs/logging"
@@ -83,6 +85,12 @@ func Module(
 					clientDone = make(chan error, 1)
 
 					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								runtimedebug.PrintStack()
+							}
+						}()
+
 						err := client.Run(runCtx)
 						clientDone <- err
 						if err != nil {
