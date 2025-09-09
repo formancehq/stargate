@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -88,6 +89,19 @@ func Module(
 						defer func() {
 							if r := recover(); r != nil {
 								runtimedebug.PrintStack()
+								err, ok := r.(error)
+								if ok {
+									l.Errorf("recovering error: %w", err)
+									clientDone <- err
+								} else {
+									l.Errorf("recovering panic: %v", r)
+									clientDone <- fmt.Errorf("panic: %v", r)
+								}
+
+								if err := shutdowner.Shutdown(); err != nil {
+									l.Errorf("error during shutdown: %v", err)
+									panic(err)
+								}
 							}
 						}()
 
