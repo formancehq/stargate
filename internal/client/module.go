@@ -67,7 +67,7 @@ func Module(
 				authInterceptor,
 			)
 		}),
-		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor, l logging.Logger) {
+		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor, l logging.Logger, shutdowner fx.Shutdowner) {
 			var runCtx context.Context
 			var runCancel context.CancelFunc
 			var clientDone chan error
@@ -83,14 +83,18 @@ func Module(
 
 					go func() {
 						err := client.Run(runCtx)
+						clientDone <- err
 						if err != nil {
 							if err == context.Canceled {
 								l.Info("client stopped gracefully")
 							} else {
 								l.Errorf("client stopped with error: %v", err)
+								if err := shutdowner.Shutdown(); err != nil {
+									l.Errorf("error during shutdown: %v", err)
+									panic(err)
+								}
 							}
 						}
-						clientDone <- err
 					}()
 
 					return nil
