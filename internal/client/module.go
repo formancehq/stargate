@@ -109,7 +109,7 @@ func Module(
 					// Wait for client to finish with timeout
 					select {
 					case err := <-clientDone:
-						if err != nil && err != context.Canceled {
+						if errors.Is(err, context.Canceled) {
 							l.Errorf("client error during shutdown: %v", err)
 						}
 					case <-time.After(30 * time.Second):
