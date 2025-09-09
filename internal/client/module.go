@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -85,7 +86,7 @@ func Module(
 						err := client.Run(runCtx)
 						clientDone <- err
 						if err != nil {
-							if err == context.Canceled {
+							if errors.Is(err, context.Canceled) {
 								l.Info("client stopped gracefully")
 							} else {
 								l.Errorf("client stopped with error: %v", err)
