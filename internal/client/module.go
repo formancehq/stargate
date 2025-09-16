@@ -2,9 +2,13 @@ package client
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	runtimedebug "runtime/debug"
 
 	"github.com/formancehq/go-libs/health"
 	"github.com/formancehq/go-libs/httpserver"
@@ -67,7 +71,7 @@ func Module(
 				authInterceptor,
 			)
 		}),
-		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor, l logging.Logger) {
+		fx.Invoke(func(lc fx.Lifecycle, client *Client, authInterceptor *interceptors.AuthInterceptor, l logging.Logger, shutdowner fx.Shutdowner) {
 			var runCtx context.Context
 			var runCancel context.CancelFunc
 			var clientDone chan error
@@ -82,15 +86,38 @@ func Module(
 					clientDone = make(chan error, 1)
 
 					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								runtimedebug.PrintStack()
+								err, ok := r.(error)
+								if ok {
+									l.Errorf("recovering error: %w", err)
+									clientDone <- err
+								} else {
+									l.Errorf("recovering panic: %v", r)
+									clientDone <- fmt.Errorf("panic: %v", r)
+								}
+
+								if err := shutdowner.Shutdown(); err != nil {
+									l.Errorf("error during shutdown: %v", err)
+									panic(err)
+								}
+							}
+						}()
+
 						err := client.Run(runCtx)
+						clientDone <- err
 						if err != nil {
-							if err == context.Canceled {
+							if errors.Is(err, context.Canceled) {
 								l.Info("client stopped gracefully")
 							} else {
 								l.Errorf("client stopped with error: %v", err)
+								if err := shutdowner.Shutdown(); err != nil {
+									l.Errorf("error during shutdown: %v", err)
+									panic(err)
+								}
 							}
 						}
-						clientDone <- err
 					}()
 
 					return nil
@@ -104,7 +131,7 @@ func Module(
 					// Wait for client to finish with timeout
 					select {
 					case err := <-clientDone:
-						if err != nil && err != context.Canceled {
+						if errors.Is(err, context.Canceled) {
 							l.Errorf("client error during shutdown: %v", err)
 						}
 					case <-time.After(30 * time.Second):
