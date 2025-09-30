@@ -38,15 +38,21 @@ func NewCircuitBreakerHTTPClient(
 ) *CircuitBreakerHTTPClient {
 	// Validate configuration
 	if config.ConsecutiveFailures == 0 {
-		logger.Warn("consecutive failures is 0, defaulting to 1")
+		logger.WithFields(map[string]any{
+			"default": 1,
+		}).Info("consecutive failures is 0, using default")
 		config.ConsecutiveFailures = 1
 	}
 	if config.MaxRequests == 0 {
-		logger.Warn("max requests is 0, defaulting to 1")
+		logger.WithFields(map[string]any{
+			"default": 1,
+		}).Info("max requests is 0, using default")
 		config.MaxRequests = 1
 	}
 	if config.Timeout == 0 {
-		logger.Warn("timeout is 0, defaulting to 30s")
+		logger.WithFields(map[string]any{
+			"default": "30s",
+		}).Info("timeout is 0, using default")
 		config.Timeout = 30 * time.Second
 	}
 
