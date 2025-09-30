@@ -11,6 +11,7 @@ type MetricsRegistry interface {
 	ServerMessageReceivedByType() metric.Int64Counter
 	ConnectionRetries() metric.Int64Counter
 	ConnectionStatus() metric.Int64UpDownCounter
+	CircuitBreakerState() metric.Float64Gauge
 }
 
 type metricsRegistry struct {
@@ -19,6 +20,7 @@ type metricsRegistry struct {
 	serverMessageReceivedByType metric.Int64Counter
 	connectionRetries           metric.Int64Counter
 	connectionStatus            metric.Int64UpDownCounter
+	circuitBreakerState         metric.Float64Gauge
 }
 
 func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistry, error) {
@@ -69,12 +71,21 @@ func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistr
 		return nil, err
 	}
 
+	circuitBreakerState, err := meter.Float64Gauge(
+		"circuit_breaker_state",
+		metric.WithDescription("Circuit breaker state (0=closed, 1=half-open, 2=open)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &metricsRegistry{
 		httpCallLatencies:           httpCallLatencies,
 		httpCallStatusCodes:         httpCallStatusCodes,
 		serverMessageReceivedByType: serverMessageReceivedByType,
 		connectionRetries:           connectionRetries,
 		connectionStatus:            connectionStatus,
+		circuitBreakerState:         circuitBreakerState,
 	}, nil
 }
 
@@ -96,6 +107,10 @@ func (m *metricsRegistry) ConnectionRetries() metric.Int64Counter {
 
 func (m *metricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
 	return m.connectionStatus
+}
+
+func (m *metricsRegistry) CircuitBreakerState() metric.Float64Gauge {
+	return m.circuitBreakerState
 }
 
 type NoOpMetricsRegistry struct{}
@@ -127,4 +142,9 @@ func (m *NoOpMetricsRegistry) ConnectionRetries() metric.Int64Counter {
 func (m *NoOpMetricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
 	counter, _ := otel.GetMeterProvider().Meter("client").Int64UpDownCounter("connection_status")
 	return counter
+}
+
+func (m *NoOpMetricsRegistry) CircuitBreakerState() metric.Float64Gauge {
+	gauge, _ := otel.GetMeterProvider().Meter("client").Float64Gauge("circuit_breaker_state")
+	return gauge
 }

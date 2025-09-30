@@ -88,7 +88,7 @@ type Client struct {
 	logger         logging.Logger
 	config         Config
 	stargateClient generated.StargateServiceClient
-	httpClient     *http.Client
+	httpClient     HTTPClient
 
 	workerPool      *pond.WorkerPool
 	metricsRegistry metrics.MetricsRegistry
@@ -106,6 +106,7 @@ func NewClient(
 	l logging.Logger,
 	clientConfig Config,
 	workerPoolConfig WorkerPoolConfig,
+	circuitBreakerConfig CircuitBreakerConfig,
 	metricsRegistry metrics.MetricsRegistry,
 	serverURL string,
 	tlsEnabled bool,
@@ -119,6 +120,19 @@ func NewClient(
 
 	clientConfig.GatewayUrl = strings.TrimSuffix(clientConfig.GatewayUrl, "/")
 
+	baseHTTPClient := &http.Client{
+		Timeout:   clientConfig.HTTPClientTimeout,
+		Transport: transport,
+	}
+
+	// Wrap with circuit breaker
+	cbHTTPClient := NewCircuitBreakerHTTPClient(
+		baseHTTPClient,
+		circuitBreakerConfig,
+		l,
+		metricsRegistry,
+	)
+
 	return &Client{
 		logger:                l,
 		config:                clientConfig,
@@ -129,10 +143,7 @@ func NewClient(
 		tlsCACertificate:      tlsCACertificate,
 		tlsInsecureSkipVerify: tlsInsecureSkipVerify,
 		authInterceptor:       authInterceptor,
-		httpClient: &http.Client{
-			Timeout:   clientConfig.HTTPClientTimeout,
-			Transport: transport,
-		},
+		httpClient:            cbHTTPClient,
 	}
 }
 

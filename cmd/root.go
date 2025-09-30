@@ -52,6 +52,10 @@ func NewRootCommand() *cobra.Command {
 	client.Flags().Bool(TlsEnabledFlag, true, "TLS enabled")
 	client.Flags().String(TlsCACertificateFlag, "", "TLS cert file")
 	client.Flags().Bool(TlsInsecureSkipVerifyFlag, false, "TLS insecure skip verify")
+	client.Flags().Uint32(CircuitBreakerMaxRequestsFlag, 5, "Circuit breaker max requests in half-open state")
+	client.Flags().Duration(CircuitBreakerIntervalFlag, 1*time.Minute, "Circuit breaker interval for counting failures")
+	client.Flags().Duration(CircuitBreakerTimeoutFlag, 30*time.Second, "Circuit breaker timeout before transitioning to half-open")
+	client.Flags().Uint32(CircuitBreakerConsecutiveFailuresFlag, 3, "Circuit breaker consecutive failures before opening")
 
 	service.AddFlags(client.PersistentFlags())
 	licence.AddFlags(client.PersistentFlags())

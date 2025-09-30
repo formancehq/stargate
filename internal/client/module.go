@@ -56,6 +56,7 @@ func Module(
 			l logging.Logger,
 			clientConfig Config,
 			workerPoolConfig WorkerPoolConfig,
+			circuitBreakerConfig CircuitBreakerConfig,
 			metricsRegistry metrics.MetricsRegistry,
 			authInterceptor *interceptors.AuthInterceptor,
 		) *Client {
@@ -63,6 +64,7 @@ func Module(
 				l,
 				clientConfig,
 				workerPoolConfig,
+				circuitBreakerConfig,
 				metricsRegistry,
 				serverURL,
 				tlsEnabled,

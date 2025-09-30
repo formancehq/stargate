@@ -46,6 +46,11 @@ const (
 	TlsEnabledFlag                               = "tls-enabled"
 	TlsInsecureSkipVerifyFlag                    = "tls-insecure-skip-verify"
 	TlsCACertificateFlag                         = "tls-ca-cert"
+
+	CircuitBreakerMaxRequestsFlag        = "circuit-breaker-max-requests"
+	CircuitBreakerIntervalFlag           = "circuit-breaker-interval"
+	CircuitBreakerTimeoutFlag            = "circuit-breaker-timeout"
+	CircuitBreakerConsecutiveFailuresFlag = "circuit-breaker-consecutive-failures"
 )
 
 func newClient() *cobra.Command {
@@ -114,6 +119,10 @@ func resolveClientOptions(cmd *cobra.Command) ([]fx.Option, error) {
 	tlsEnabled, _ := cmd.Flags().GetBool(TlsEnabledFlag)
 	tlsCaCert, _ := cmd.Flags().GetString(TlsCACertificateFlag)
 	tlsInsecureSkipVerify, _ := cmd.Flags().GetBool(TlsInsecureSkipVerifyFlag)
+	circuitBreakerMaxRequests, _ := cmd.Flags().GetUint32(CircuitBreakerMaxRequestsFlag)
+	circuitBreakerInterval, _ := cmd.Flags().GetDuration(CircuitBreakerIntervalFlag)
+	circuitBreakerTimeout, _ := cmd.Flags().GetDuration(CircuitBreakerTimeoutFlag)
+	circuitBreakerConsecutiveFailures, _ := cmd.Flags().GetUint32(CircuitBreakerConsecutiveFailuresFlag)
 
 	// Validate retry configuration
 	if err := validateRetryConfig(maxRetries, initialRetryDelay, maxRetryDelay, retryMultiplier); err != nil {
@@ -165,6 +174,14 @@ func resolveClientOptions(cmd *cobra.Command) ([]fx.Option, error) {
 		}),
 		fx.Provide(func() controllers.StargateControllerConfig {
 			return controllers.NewStargateControllerConfig(Version)
+		}),
+		fx.Provide(func() client.CircuitBreakerConfig {
+			return client.CircuitBreakerConfig{
+				MaxRequests:        circuitBreakerMaxRequests,
+				Interval:           circuitBreakerInterval,
+				Timeout:            circuitBreakerTimeout,
+				ConsecutiveFailures: circuitBreakerConsecutiveFailures,
+			}
 		}),
 		client.Module(
 			bind,
