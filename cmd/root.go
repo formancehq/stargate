@@ -52,6 +52,7 @@ func NewRootCommand() *cobra.Command {
 	client.Flags().Bool(TlsEnabledFlag, true, "TLS enabled")
 	client.Flags().String(TlsCACertificateFlag, "", "TLS cert file")
 	client.Flags().Bool(TlsInsecureSkipVerifyFlag, false, "TLS insecure skip verify")
+	client.Flags().Duration(ShutdownTimeoutFlag, 30*time.Second, "Timeout waiting for graceful shutdown before forcing termination")
 
 	service.AddFlags(client.PersistentFlags())
 	licence.AddFlags(client.PersistentFlags())

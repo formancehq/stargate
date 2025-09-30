@@ -29,6 +29,7 @@ func Module(
 	tlsEnabled bool,
 	tlsCACertificate string,
 	tlsInsecureSkipVerify bool,
+	shutdownTimeout time.Duration,
 	debug bool,
 ) fx.Option {
 	options := make([]fx.Option, 0)
@@ -134,7 +135,7 @@ func Module(
 						if !errors.Is(err, context.Canceled) {
 							l.Errorf("client error during shutdown: %v", err)
 						}
-					case <-time.After(30 * time.Second):
+					case <-time.After(shutdownTimeout):
 						l.WithFields(map[string]any{
 							"waiting_tasks":    client.workerPool.WaitingTasks(),
 							"running_workers":  client.workerPool.RunningWorkers(),

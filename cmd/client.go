@@ -46,6 +46,7 @@ const (
 	TlsEnabledFlag                               = "tls-enabled"
 	TlsInsecureSkipVerifyFlag                    = "tls-insecure-skip-verify"
 	TlsCACertificateFlag                         = "tls-ca-cert"
+	ShutdownTimeoutFlag                          = "shutdown-timeout"
 )
 
 func newClient() *cobra.Command {
@@ -114,6 +115,7 @@ func resolveClientOptions(cmd *cobra.Command) ([]fx.Option, error) {
 	tlsEnabled, _ := cmd.Flags().GetBool(TlsEnabledFlag)
 	tlsCaCert, _ := cmd.Flags().GetString(TlsCACertificateFlag)
 	tlsInsecureSkipVerify, _ := cmd.Flags().GetBool(TlsInsecureSkipVerifyFlag)
+	shutdownTimeout, _ := cmd.Flags().GetDuration(ShutdownTimeoutFlag)
 
 	// Validate retry configuration
 	if err := validateRetryConfig(maxRetries, initialRetryDelay, maxRetryDelay, retryMultiplier); err != nil {
@@ -172,6 +174,7 @@ func resolveClientOptions(cmd *cobra.Command) ([]fx.Option, error) {
 			tlsEnabled,
 			tlsCaCert,
 			tlsInsecureSkipVerify,
+			shutdownTimeout,
 			app.IsDebug(cmd),
 		),
 	)
