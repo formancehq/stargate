@@ -124,7 +124,10 @@ func Module(
 					return nil
 				},
 				OnStop: func(ctx context.Context) error {
-					l.Info("stopping stargate client...")
+					l.WithFields(map[string]any{
+						"organization_id": client.config.OrganizationID,
+						"stack_id":        client.config.StackID,
+					}).Info("stopping stargate client...")
 
 					// Cancel the client context
 					runCancel()
@@ -133,12 +136,18 @@ func Module(
 					select {
 					case err := <-clientDone:
 						if !errors.Is(err, context.Canceled) {
-							l.Errorf("client error during shutdown: %v", err)
+							l.WithFields(map[string]any{
+								"organization_id": client.config.OrganizationID,
+								"stack_id":        client.config.StackID,
+								"error":           err.Error(),
+							}).Error("client error during shutdown")
 						}
 					case <-time.After(shutdownTimeout):
 						l.WithFields(map[string]any{
-							"waiting_tasks":    client.workerPool.WaitingTasks(),
-							"running_workers":  client.workerPool.RunningWorkers(),
+							"organization_id": client.config.OrganizationID,
+							"stack_id":        client.config.StackID,
+							"waiting_tasks":   client.workerPool.WaitingTasks(),
+							"running_workers": client.workerPool.RunningWorkers(),
 						}).Error("timeout waiting for client to stop, forcing shutdown")
 
 						// Record timeout metric
@@ -150,7 +159,11 @@ func Module(
 						// Force close gRPC connection
 						if client.grpcConn != nil {
 							if err := client.grpcConn.Close(); err != nil {
-								l.Errorf("error force closing grpc connection: %v", err)
+								l.WithFields(map[string]any{
+									"organization_id": client.config.OrganizationID,
+									"stack_id":        client.config.StackID,
+									"error":           err.Error(),
+								}).Error("error force closing grpc connection")
 							}
 						}
 					}
