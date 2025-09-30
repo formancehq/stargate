@@ -16,6 +16,8 @@ import (
 )
 
 func TestNewConfig(t *testing.T) {
+	t.Parallel()
+
 	endpoint := "https://auth.example.com"
 	refreshDuration := 5 * time.Minute
 	clientID := "test-client-id"
@@ -30,6 +32,8 @@ func TestNewConfig(t *testing.T) {
 }
 
 func TestNewAuthInterceptor(t *testing.T) {
+	t.Parallel()
+
 	config := NewConfig(
 		"https://auth.example.com",
 		5*time.Minute,
@@ -48,6 +52,8 @@ func TestNewAuthInterceptor(t *testing.T) {
 }
 
 func TestAuthInterceptor_Close(t *testing.T) {
+	t.Parallel()
+
 	config := NewConfig(
 		"https://auth.example.com",
 		5*time.Minute,
@@ -71,6 +77,8 @@ func TestAuthInterceptor_Close(t *testing.T) {
 }
 
 func TestAuthInterceptor_StreamClientInterceptor(t *testing.T) {
+	t.Parallel()
+
 	config := NewConfig(
 		"https://auth.example.com",
 		5*time.Minute,
@@ -105,6 +113,8 @@ func TestAuthInterceptor_StreamClientInterceptor(t *testing.T) {
 }
 
 func TestAuthInterceptor_RefreshToken_Success(t *testing.T) {
+	t.Parallel()
+
 	// Create a mock OIDC discovery server
 	discoveryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/openid-configuration" {
@@ -163,6 +173,8 @@ func TestAuthInterceptor_RefreshToken_Success(t *testing.T) {
 }
 
 func TestAuthInterceptor_RefreshToken_InvalidEndpoint(t *testing.T) {
+	t.Parallel()
+
 	config := NewConfig(
 		"http://invalid-endpoint-that-does-not-exist-12345.local",
 		5*time.Minute,
@@ -179,6 +191,8 @@ func TestAuthInterceptor_RefreshToken_InvalidEndpoint(t *testing.T) {
 }
 
 func TestAuthInterceptor_RefreshToken_InvalidTokenResponse(t *testing.T) {
+	t.Parallel()
+
 	// Create a mock server that returns invalid token response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/openid-configuration" {
@@ -223,6 +237,8 @@ func TestAuthInterceptor_RefreshToken_InvalidTokenResponse(t *testing.T) {
 }
 
 func TestAuthInterceptor_ScheduleRefreshToken(t *testing.T) {
+	t.Parallel()
+
 	// Create a mock OIDC server with very short token expiry
 	var tokenCallCount int32
 	var tokensMu sync.Mutex
@@ -302,6 +318,8 @@ func TestAuthInterceptor_ScheduleRefreshToken(t *testing.T) {
 }
 
 func TestAuthInterceptor_ScheduleRefreshToken_CloseStopsRefresh(t *testing.T) {
+	t.Parallel()
+
 	var tokenCallCount int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/openid-configuration" {
@@ -360,6 +378,8 @@ func TestAuthInterceptor_ScheduleRefreshToken_CloseStopsRefresh(t *testing.T) {
 }
 
 func TestConfig_Fields(t *testing.T) {
+	t.Parallel()
+
 	config := Config{
 		refreshTokenDurationBeforeExpireTime: 10 * time.Minute,
 		clientID:                             "my-client-id",
@@ -374,5 +394,7 @@ func TestConfig_Fields(t *testing.T) {
 }
 
 func TestDefaultWaitingTime(t *testing.T) {
+	t.Parallel()
+
 	require.Equal(t, 10*time.Second, defaultWaitingTime)
 }
