@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -35,6 +36,20 @@ func NewCircuitBreakerHTTPClient(
 	logger logging.Logger,
 	metricsRegistry grpcmetrics.MetricsRegistry,
 ) *CircuitBreakerHTTPClient {
+	// Validate configuration
+	if config.ConsecutiveFailures == 0 {
+		logger.Warn("consecutive failures is 0, defaulting to 1")
+		config.ConsecutiveFailures = 1
+	}
+	if config.MaxRequests == 0 {
+		logger.Warn("max requests is 0, defaulting to 1")
+		config.MaxRequests = 1
+	}
+	if config.Timeout == 0 {
+		logger.Warn("timeout is 0, defaulting to 30s")
+		config.Timeout = 30 * time.Second
+	}
+
 	settings := gobreaker.Settings{
 		Name:        "gateway-http",
 		MaxRequests: config.MaxRequests,
@@ -74,10 +89,26 @@ func NewCircuitBreakerHTTPClient(
 
 func (c *CircuitBreakerHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	result, err := c.breaker.Execute(func() (interface{}, error) {
-		return c.client.Do(req)
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		// Treat 5xx responses as failures for circuit breaker
+		if resp.StatusCode >= 500 {
+			return resp, &httpError{StatusCode: resp.StatusCode}
+		}
+		return resp, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result.(*http.Response), nil
+}
+
+type httpError struct {
+	StatusCode int
+}
+
+func (e *httpError) Error() string {
+	return fmt.Sprintf("HTTP %d", e.StatusCode)
 }
