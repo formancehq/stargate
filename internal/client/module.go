@@ -131,11 +131,27 @@ func Module(
 					// Wait for client to finish with timeout
 					select {
 					case err := <-clientDone:
-						if errors.Is(err, context.Canceled) {
+						if !errors.Is(err, context.Canceled) {
 							l.Errorf("client error during shutdown: %v", err)
 						}
 					case <-time.After(30 * time.Second):
-						l.Error("timeout waiting for client to stop")
+						l.WithFields(map[string]any{
+							"waiting_tasks":    client.workerPool.WaitingTasks(),
+							"running_workers":  client.workerPool.RunningWorkers(),
+						}).Error("timeout waiting for client to stop, forcing shutdown")
+
+						// Record timeout metric
+						client.metricsRegistry.ShutdownTimeouts().Add(context.Background(), 1)
+
+						// Force stop worker pool
+						client.workerPool.Stop()
+
+						// Force close gRPC connection
+						if client.grpcConn != nil {
+							if err := client.grpcConn.Close(); err != nil {
+								l.Errorf("error force closing grpc connection: %v", err)
+							}
+						}
 					}
 
 					authInterceptor.Close()
