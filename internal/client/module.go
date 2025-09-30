@@ -82,7 +82,7 @@ func Module(
 						return err
 					}
 
-					runCtx, runCancel = context.WithCancel(context.Background())
+					runCtx, runCancel = context.WithCancel(ctx)
 					clientDone = make(chan error, 1)
 
 					go func() {
@@ -141,7 +141,7 @@ func Module(
 						}).Error("timeout waiting for client to stop, forcing shutdown")
 
 						// Record timeout metric
-						client.metricsRegistry.ShutdownTimeouts().Add(context.Background(), 1)
+						client.metricsRegistry.ShutdownTimeouts().Add(ctx, 1)
 
 						// Force stop worker pool
 						client.workerPool.Stop()
