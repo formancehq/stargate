@@ -131,6 +131,8 @@ func NewClient(
 		circuitBreakerConfig,
 		l,
 		metricsRegistry,
+		clientConfig.OrganizationID,
+		clientConfig.StackID,
 	)
 
 	return &Client{

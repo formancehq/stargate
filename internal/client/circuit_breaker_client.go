@@ -21,6 +21,8 @@ type CircuitBreakerHTTPClient struct {
 	breaker         *gobreaker.CircuitBreaker
 	logger          logging.Logger
 	metricsRegistry grpcmetrics.MetricsRegistry
+	organizationID  string
+	stackID         string
 }
 
 type CircuitBreakerConfig struct {
@@ -35,6 +37,8 @@ func NewCircuitBreakerHTTPClient(
 	config CircuitBreakerConfig,
 	logger logging.Logger,
 	metricsRegistry grpcmetrics.MetricsRegistry,
+	organizationID string,
+	stackID string,
 ) *CircuitBreakerHTTPClient {
 	// Validate configuration
 	if config.ConsecutiveFailures == 0 {
@@ -66,6 +70,8 @@ func NewCircuitBreakerHTTPClient(
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			logger.WithFields(map[string]any{
+				"organization_id": organizationID,
+				"stack_id":        stackID,
 				"circuit_breaker": name,
 				"from_state":      from.String(),
 				"to_state":        to.String(),
@@ -90,6 +96,8 @@ func NewCircuitBreakerHTTPClient(
 		breaker:         gobreaker.NewCircuitBreaker(settings),
 		logger:          logger,
 		metricsRegistry: metricsRegistry,
+		organizationID:  organizationID,
+		stackID:         stackID,
 	}
 }
 

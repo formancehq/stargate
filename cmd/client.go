@@ -47,9 +47,9 @@ const (
 	TlsInsecureSkipVerifyFlag                    = "tls-insecure-skip-verify"
 	TlsCACertificateFlag                         = "tls-ca-cert"
 
-	CircuitBreakerMaxRequestsFlag        = "circuit-breaker-max-requests"
-	CircuitBreakerIntervalFlag           = "circuit-breaker-interval"
-	CircuitBreakerTimeoutFlag            = "circuit-breaker-timeout"
+	CircuitBreakerMaxRequestsFlag         = "circuit-breaker-max-requests"
+	CircuitBreakerIntervalFlag            = "circuit-breaker-interval"
+	CircuitBreakerTimeoutFlag             = "circuit-breaker-timeout"
 	CircuitBreakerConsecutiveFailuresFlag = "circuit-breaker-consecutive-failures"
 )
 
