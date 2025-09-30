@@ -3,6 +3,8 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/formancehq/go-libs/v2/logging"
 )
 
 type StargateControllerConfig struct {
@@ -38,7 +40,10 @@ func (s *StargateController) GetInfo(w http.ResponseWriter, r *http.Request) {
 		Version: s.config.version,
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(info); err != nil {
-		panic(err)
+		logging.FromContext(r.Context()).Errorf("failed to encode info response: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
 }
