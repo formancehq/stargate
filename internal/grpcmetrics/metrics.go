@@ -1,8 +1,8 @@
 package grpcmetrics
 
 import (
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 type MetricsRegistry interface {
@@ -146,48 +146,52 @@ func (m *metricsRegistry) AuthTokenExpiry() metric.Float64Gauge {
 	return m.authTokenExpiry
 }
 
-type NoOpMetricsRegistry struct{}
+type NoOpMetricsRegistry struct {
+	meter metric.Meter
+}
 
 func NewNoOpMetricsRegistry() *NoOpMetricsRegistry {
-	return &NoOpMetricsRegistry{}
+	return &NoOpMetricsRegistry{
+		meter: noop.NewMeterProvider().Meter("client"),
+	}
 }
 
 func (m *NoOpMetricsRegistry) HTTPCallLatencies() metric.Int64Histogram {
-	histogram, _ := otel.GetMeterProvider().Meter("client").Int64Histogram("http_call_latencies")
+	histogram, _ := m.meter.Int64Histogram("http_call_latencies")
 	return histogram
 }
 
 func (m *NoOpMetricsRegistry) HTTPCallStatusCodes() metric.Int64Counter {
-	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("http_call_status_codes")
+	counter, _ := m.meter.Int64Counter("http_call_status_codes")
 	return counter
 }
 
 func (m *NoOpMetricsRegistry) ServerMessageReceivedByType() metric.Int64Counter {
-	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("server_message_received_by_type")
+	counter, _ := m.meter.Int64Counter("server_message_received_by_type")
 	return counter
 }
 
 func (m *NoOpMetricsRegistry) ConnectionRetries() metric.Int64Counter {
-	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("connection_retries")
+	counter, _ := m.meter.Int64Counter("connection_retries")
 	return counter
 }
 
 func (m *NoOpMetricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
-	counter, _ := otel.GetMeterProvider().Meter("client").Int64UpDownCounter("connection_status")
+	counter, _ := m.meter.Int64UpDownCounter("connection_status")
 	return counter
 }
 
 func (m *NoOpMetricsRegistry) AuthTokenRefreshErrors() metric.Int64Counter {
-	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("auth_token_refresh_errors_total")
+	counter, _ := m.meter.Int64Counter("auth_token_refresh_errors_total")
 	return counter
 }
 
 func (m *NoOpMetricsRegistry) AuthTokenRefreshDuration() metric.Int64Histogram {
-	histogram, _ := otel.GetMeterProvider().Meter("client").Int64Histogram("auth_token_refresh_duration_milliseconds")
+	histogram, _ := m.meter.Int64Histogram("auth_token_refresh_duration_milliseconds")
 	return histogram
 }
 
 func (m *NoOpMetricsRegistry) AuthTokenExpiry() metric.Float64Gauge {
-	gauge, _ := otel.GetMeterProvider().Meter("client").Float64Gauge("auth_token_expiry_timestamp")
+	gauge, _ := m.meter.Float64Gauge("auth_token_expiry_timestamp")
 	return gauge
 }
