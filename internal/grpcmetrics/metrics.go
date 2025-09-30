@@ -11,6 +11,9 @@ type MetricsRegistry interface {
 	ServerMessageReceivedByType() metric.Int64Counter
 	ConnectionRetries() metric.Int64Counter
 	ConnectionStatus() metric.Int64UpDownCounter
+	AuthTokenRefreshErrors() metric.Int64Counter
+	AuthTokenRefreshDuration() metric.Int64Histogram
+	AuthTokenExpiry() metric.Float64Gauge
 }
 
 type metricsRegistry struct {
@@ -19,6 +22,9 @@ type metricsRegistry struct {
 	serverMessageReceivedByType metric.Int64Counter
 	connectionRetries           metric.Int64Counter
 	connectionStatus            metric.Int64UpDownCounter
+	authTokenRefreshErrors      metric.Int64Counter
+	authTokenRefreshDuration    metric.Int64Histogram
+	authTokenExpiry             metric.Float64Gauge
 }
 
 func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistry, error) {
@@ -69,12 +75,42 @@ func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistr
 		return nil, err
 	}
 
+	authTokenRefreshErrors, err := meter.Int64Counter(
+		"auth_token_refresh_errors_total",
+		metric.WithUnit("1"),
+		metric.WithDescription("Total number of authentication token refresh errors"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	authTokenRefreshDuration, err := meter.Int64Histogram(
+		"auth_token_refresh_duration_milliseconds",
+		metric.WithUnit("ms"),
+		metric.WithDescription("Duration of authentication token refresh operations"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	authTokenExpiry, err := meter.Float64Gauge(
+		"auth_token_expiry_timestamp",
+		metric.WithUnit("s"),
+		metric.WithDescription("Unix timestamp when the authentication token expires"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &metricsRegistry{
 		httpCallLatencies:           httpCallLatencies,
 		httpCallStatusCodes:         httpCallStatusCodes,
 		serverMessageReceivedByType: serverMessageReceivedByType,
 		connectionRetries:           connectionRetries,
 		connectionStatus:            connectionStatus,
+		authTokenRefreshErrors:      authTokenRefreshErrors,
+		authTokenRefreshDuration:    authTokenRefreshDuration,
+		authTokenExpiry:             authTokenExpiry,
 	}, nil
 }
 
@@ -96,6 +132,18 @@ func (m *metricsRegistry) ConnectionRetries() metric.Int64Counter {
 
 func (m *metricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
 	return m.connectionStatus
+}
+
+func (m *metricsRegistry) AuthTokenRefreshErrors() metric.Int64Counter {
+	return m.authTokenRefreshErrors
+}
+
+func (m *metricsRegistry) AuthTokenRefreshDuration() metric.Int64Histogram {
+	return m.authTokenRefreshDuration
+}
+
+func (m *metricsRegistry) AuthTokenExpiry() metric.Float64Gauge {
+	return m.authTokenExpiry
 }
 
 type NoOpMetricsRegistry struct{}
@@ -127,4 +175,19 @@ func (m *NoOpMetricsRegistry) ConnectionRetries() metric.Int64Counter {
 func (m *NoOpMetricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
 	counter, _ := otel.GetMeterProvider().Meter("client").Int64UpDownCounter("connection_status")
 	return counter
+}
+
+func (m *NoOpMetricsRegistry) AuthTokenRefreshErrors() metric.Int64Counter {
+	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("auth_token_refresh_errors_total")
+	return counter
+}
+
+func (m *NoOpMetricsRegistry) AuthTokenRefreshDuration() metric.Int64Histogram {
+	histogram, _ := otel.GetMeterProvider().Meter("client").Int64Histogram("auth_token_refresh_duration_milliseconds")
+	return histogram
+}
+
+func (m *NoOpMetricsRegistry) AuthTokenExpiry() metric.Float64Gauge {
+	gauge, _ := otel.GetMeterProvider().Meter("client").Float64Gauge("auth_token_expiry_timestamp")
+	return gauge
 }

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/formancehq/go-libs/logging"
+	"github.com/formancehq/stack/ee/stargate/internal/grpcmetrics"
 	"github.com/pkg/errors"
 	"github.com/zitadel/oidc/pkg/client"
 	"golang.org/x/oauth2/clientcredentials"
@@ -40,18 +42,26 @@ func NewConfig(
 }
 
 type AuthInterceptor struct {
-	config     Config
-	httpClient *http.Client
+	config          Config
+	httpClient      *http.Client
+	logger          logging.Logger
+	metricsRegistry grpcmetrics.MetricsRegistry
 
 	accessToken string
 	closeChan   chan struct{}
 }
 
-func NewAuthInterceptor(config Config) (*AuthInterceptor, error) {
+func NewAuthInterceptor(
+	config Config,
+	logger logging.Logger,
+	metricsRegistry grpcmetrics.MetricsRegistry,
+) (*AuthInterceptor, error) {
 	i := &AuthInterceptor{
-		config:     config,
-		httpClient: &http.Client{},
-		closeChan:  make(chan struct{}),
+		config:          config,
+		httpClient:      &http.Client{},
+		logger:          logger,
+		metricsRegistry: metricsRegistry,
+		closeChan:       make(chan struct{}),
 	}
 
 	return i, nil
@@ -96,11 +106,28 @@ func (a *AuthInterceptor) ScheduleRefreshToken() error {
 			case <-a.closeChan:
 				return
 			case <-time.After(waitingTime):
+				start := time.Now()
 				expire, err := a.refreshToken()
 				if err != nil {
-					// TODO(polo): add metrics + log
+					a.logger.WithFields(map[string]any{
+						"error":         err.Error(),
+						"next_retry_in": time.Second.String(),
+						"endpoint":      a.config.endpoint,
+					}).Error("failed to refresh authentication token")
+
+					a.metricsRegistry.AuthTokenRefreshErrors().Add(context.Background(), 1)
 					waitingTime = time.Second
 				} else {
+					duration := time.Since(start)
+					a.metricsRegistry.AuthTokenRefreshDuration().Record(context.Background(), duration.Milliseconds())
+					a.metricsRegistry.AuthTokenExpiry().Record(context.Background(), float64(expire.Unix()))
+
+					a.logger.WithFields(map[string]any{
+						"expiry":         expire.Format(time.RFC3339),
+						"duration_ms":    duration.Milliseconds(),
+						"next_refresh_in": time.Until(expire.Add(-a.config.refreshTokenDurationBeforeExpireTime)).String(),
+					}).Debug("authentication token refreshed successfully")
+
 					waitingTime = time.Until(expire.Add(-a.config.refreshTokenDurationBeforeExpireTime))
 					if waitingTime < 0 {
 						waitingTime = defaultWaitingTime
