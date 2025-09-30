@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -24,10 +23,10 @@ func TestNewConfig(t *testing.T) {
 
 	config := NewConfig(endpoint, refreshDuration, clientID, clientSecret)
 
-	assert.Equal(t, endpoint, config.endpoint)
-	assert.Equal(t, refreshDuration, config.refreshTokenDurationBeforeExpireTime)
-	assert.Equal(t, clientID, config.clientID)
-	assert.Equal(t, clientSecret, config.clientSecret)
+	require.Equal(t, endpoint, config.endpoint)
+	require.Equal(t, refreshDuration, config.refreshTokenDurationBeforeExpireTime)
+	require.Equal(t, clientID, config.clientID)
+	require.Equal(t, clientSecret, config.clientSecret)
 }
 
 func TestNewAuthInterceptor(t *testing.T) {
@@ -41,11 +40,11 @@ func TestNewAuthInterceptor(t *testing.T) {
 	interceptor, err := NewAuthInterceptor(config)
 
 	require.NoError(t, err)
-	assert.NotNil(t, interceptor)
-	assert.NotNil(t, interceptor.httpClient)
-	assert.NotNil(t, interceptor.closeChan)
-	assert.Equal(t, config, interceptor.config)
-	assert.Empty(t, interceptor.accessToken)
+	require.NotNil(t, interceptor)
+	require.NotNil(t, interceptor.httpClient)
+	require.NotNil(t, interceptor.closeChan)
+	require.Equal(t, config, interceptor.config)
+	require.Empty(t, interceptor.accessToken)
 }
 
 func TestAuthInterceptor_Close(t *testing.T) {
@@ -93,7 +92,7 @@ func TestAuthInterceptor_StreamClientInterceptor(t *testing.T) {
 
 		authValues := md.Get("authorization")
 		require.Len(t, authValues, 1, "should have exactly one authorization value")
-		assert.Equal(t, testToken, authValues[0])
+		require.Equal(t, testToken, authValues[0])
 
 		return nil, nil
 	}
@@ -129,7 +128,7 @@ func TestAuthInterceptor_RefreshToken_Success(t *testing.T) {
 			// Verify it's a client credentials grant
 			err := r.ParseForm()
 			require.NoError(t, err)
-			assert.Equal(t, "client_credentials", r.FormValue("grant_type"))
+			require.Equal(t, "client_credentials", r.FormValue("grant_type"))
 
 			response := map[string]interface{}{
 				"access_token": "test-token-12345",
@@ -158,9 +157,9 @@ func TestAuthInterceptor_RefreshToken_Success(t *testing.T) {
 	expiry, err := interceptor.refreshToken()
 	require.NoError(t, err)
 
-	assert.Equal(t, "test-token-12345", interceptor.accessToken)
-	assert.False(t, expiry.IsZero(), "expiry time should be set")
-	assert.True(t, expiry.After(time.Now()), "expiry should be in the future")
+	require.Equal(t, "test-token-12345", interceptor.accessToken)
+	require.False(t, expiry.IsZero(), "expiry time should be set")
+	require.True(t, expiry.After(time.Now()), "expiry should be in the future")
 }
 
 func TestAuthInterceptor_RefreshToken_InvalidEndpoint(t *testing.T) {
@@ -175,8 +174,8 @@ func TestAuthInterceptor_RefreshToken_InvalidEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = interceptor.refreshToken()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot discover endpoint")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot discover endpoint")
 }
 
 func TestAuthInterceptor_RefreshToken_InvalidTokenResponse(t *testing.T) {
@@ -219,8 +218,8 @@ func TestAuthInterceptor_RefreshToken_InvalidTokenResponse(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = interceptor.refreshToken()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot fetch token")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot fetch token")
 }
 
 func TestAuthInterceptor_ScheduleRefreshToken(t *testing.T) {
@@ -284,19 +283,19 @@ func TestAuthInterceptor_ScheduleRefreshToken(t *testing.T) {
 	require.NoError(t, err)
 
 	initialCallCount := atomic.LoadInt32(&tokenCallCount)
-	assert.Greater(t, initialCallCount, int32(0), "initial token should be fetched")
+	require.Greater(t, initialCallCount, int32(0), "initial token should be fetched")
 
 	// Wait for automatic refresh (should happen in ~500ms)
 	time.Sleep(1200 * time.Millisecond)
 
 	finalCallCount := atomic.LoadInt32(&tokenCallCount)
-	assert.Greater(t, finalCallCount, initialCallCount, "token endpoint should have been called again")
+	require.Greater(t, finalCallCount, initialCallCount, "token endpoint should have been called again")
 
 	// Verify we got multiple different tokens
 	tokensMu.Lock()
 	uniqueTokens := len(tokens)
 	tokensMu.Unlock()
-	assert.GreaterOrEqual(t, uniqueTokens, 2, "should have received at least 2 tokens")
+	require.GreaterOrEqual(t, uniqueTokens, 2, "should have received at least 2 tokens")
 
 	// Clean up
 	interceptor.Close()
@@ -357,7 +356,7 @@ func TestAuthInterceptor_ScheduleRefreshToken_CloseStopsRefresh(t *testing.T) {
 
 	// Wait and verify no more token refreshes happen
 	time.Sleep(800 * time.Millisecond)
-	assert.Equal(t, initialCallCount, atomic.LoadInt32(&tokenCallCount), "no additional token calls should be made after close")
+	require.Equal(t, initialCallCount, atomic.LoadInt32(&tokenCallCount), "no additional token calls should be made after close")
 }
 
 func TestConfig_Fields(t *testing.T) {
@@ -368,12 +367,12 @@ func TestConfig_Fields(t *testing.T) {
 		endpoint:                             "https://auth.example.com",
 	}
 
-	assert.Equal(t, 10*time.Minute, config.refreshTokenDurationBeforeExpireTime)
-	assert.Equal(t, "my-client-id", config.clientID)
-	assert.Equal(t, "my-client-secret", config.clientSecret)
-	assert.Equal(t, "https://auth.example.com", config.endpoint)
+	require.Equal(t, 10*time.Minute, config.refreshTokenDurationBeforeExpireTime)
+	require.Equal(t, "my-client-id", config.clientID)
+	require.Equal(t, "my-client-secret", config.clientSecret)
+	require.Equal(t, "https://auth.example.com", config.endpoint)
 }
 
 func TestDefaultWaitingTime(t *testing.T) {
-	assert.Equal(t, 10*time.Second, defaultWaitingTime)
+	require.Equal(t, 10*time.Second, defaultWaitingTime)
 }
