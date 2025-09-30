@@ -221,13 +221,13 @@ func (c *Client) Run(ctx context.Context) error {
 		if !c.shouldRetry(err) {
 			// Extract gRPC status for better error context
 			if st, ok := status.FromError(err); ok {
-				c.logger.WithFields(map[string]any{
+				c.logWithContext().WithFields(map[string]any{
 					"error_code":    st.Code().String(),
 					"error_message": st.Message(),
 					"error_details": st.Details(),
 				}).Error("non-retryable gRPC error occurred")
 			} else {
-				c.logger.WithFields(map[string]any{
+				c.logWithContext().WithFields(map[string]any{
 					"error_type": fmt.Sprintf("%T", err),
 					"error":      err.Error(),
 				}).Error("non-retryable error occurred")
@@ -249,7 +249,7 @@ func (c *Client) Run(ctx context.Context) error {
 				logFields["last_error_type"] = fmt.Sprintf("%T", err)
 			}
 
-			c.logger.WithFields(logFields).Error("max retries reached, giving up")
+			c.logWithContext().WithFields(logFields).Error("max retries reached, giving up")
 			return fmt.Errorf("max retries (%d) reached: %w", c.config.MaxRetries, err)
 		}
 
@@ -278,7 +278,7 @@ func (c *Client) Run(ctx context.Context) error {
 			logFields["error_type"] = fmt.Sprintf("%T", err)
 		}
 
-		c.logger.WithFields(logFields).Info("connection lost, retrying...")
+		c.logWithContext().WithFields(logFields).Info("connection lost, retrying...")
 
 		// Force reconnection on next attempt
 		if c.grpcConn != nil {
@@ -308,20 +308,14 @@ func (c *Client) runStream(ctx context.Context) error {
 		"stack-id", c.config.StackID,
 	)
 
-	c.logger.WithFields(map[string]any{
-		"organization_id": c.config.OrganizationID,
-		"stack_id":        c.config.StackID,
-	}).Info("connecting to stargate server...")
+	c.logWithContext().Info("connecting to stargate server...")
 
 	stream, err := c.stargateClient.Stargate(ctx)
 	if err != nil {
 		return err
 	}
 
-	c.logger.WithFields(map[string]any{
-		"organization_id": c.config.OrganizationID,
-		"stack_id":        c.config.StackID,
-	}).Info("connected to stargate server")
+	c.logWithContext().Info("connected to stargate server")
 
 	c.metricsRegistry.ConnectionStatus().Add(ctx, 1, metric.WithAttributes(
 		attribute.String("organization_id", c.config.OrganizationID),
@@ -333,10 +327,7 @@ func (c *Client) runStream(ctx context.Context) error {
 			attribute.String("organization_id", c.config.OrganizationID),
 			attribute.String("stack_id", c.config.StackID),
 		))
-		c.logger.WithFields(map[string]any{
-			"organization_id": c.config.OrganizationID,
-			"stack_id":        c.config.StackID,
-		}).Info("disconnected from stargate server")
+		c.logWithContext().Info("disconnected from stargate server")
 	}()
 
 	responseChan := make(chan *ResponseChanEvent, c.config.ChanSize)
@@ -352,7 +343,7 @@ func (c *Client) runStream(ctx context.Context) error {
 				return err
 			}
 
-			c.logger.WithFields(map[string]any{
+			c.logWithContext().WithFields(map[string]any{
 				"event": in,
 			}).Debug("received message from server")
 
@@ -382,7 +373,7 @@ func (c *Client) runStream(ctx context.Context) error {
 					continue
 				}
 
-				c.logger.WithFields(map[string]any{
+				c.logWithContext().WithFields(map[string]any{
 					"response": response,
 				}).Debug("sending response message to server")
 
