@@ -13,7 +13,7 @@ tidy:
     go mod tidy
     
 generate:
-    protoc --go_out=generated --go_opt=paths=source_relative --go-grpc_out=generated --go-grpc_opt=paths=source_relative stargate.proto
+    protoc --go_out=generated --go_opt=paths=source_relative --go-grpc_out=./internal/generated --go-grpc_opt=paths=source_relative stargate.proto
 g: generate
 
 tests:

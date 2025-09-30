@@ -174,10 +174,10 @@ func (c *Client) createGRPCConnection() error {
 
 	// Close existing connection if any
 	if c.grpcConn != nil {
-		c.grpcConn.Close()
+		_ = c.grpcConn.Close()
 	}
 
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		c.serverURL,
 		grpc.WithStreamInterceptor(c.authInterceptor.StreamClientInterceptor()),
 		grpc.WithTransportCredentials(credential),
@@ -271,7 +271,7 @@ func (c *Client) Run(ctx context.Context) error {
 
 		// Force reconnection on next attempt
 		if c.grpcConn != nil {
-			c.grpcConn.Close()
+			_ = c.grpcConn.Close()
 			c.grpcConn = nil
 		}
 
@@ -528,7 +528,7 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 func (c *Client) Close() error {
 	c.workerPool.StopAndWait()
 	if c.grpcConn != nil {
-		c.grpcConn.Close()
+		return c.grpcConn.Close()
 	}
 	return nil
 }
