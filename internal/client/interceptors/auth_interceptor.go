@@ -125,7 +125,8 @@ func (a *AuthInterceptor) refreshToken() (time.Time, error) {
 		TokenURL:     discoveryConfiguration.TokenEndpoint,
 	}
 
-	token, err := config.Token(context.Background())
+	// Use context.TODO() for OAuth token fetch as this is not tied to any specific request
+	token, err := config.Token(context.TODO())
 	if err != nil {
 		return time.Time{}, errors.Wrapf(err, "cannot fetch token")
 	}

@@ -82,7 +82,7 @@ func Module(
 						return err
 					}
 
-					runCtx, runCancel = context.WithCancel(context.Background())
+					runCtx, runCancel = context.WithCancel(ctx)
 					clientDone = make(chan error, 1)
 
 					go func() {
