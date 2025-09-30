@@ -11,7 +11,6 @@ type MetricsRegistry interface {
 	ServerMessageReceivedByType() metric.Int64Counter
 	ConnectionRetries() metric.Int64Counter
 	ConnectionStatus() metric.Int64UpDownCounter
-	ShutdownTimeouts() metric.Int64Counter
 }
 
 type metricsRegistry struct {
@@ -20,7 +19,6 @@ type metricsRegistry struct {
 	serverMessageReceivedByType metric.Int64Counter
 	connectionRetries           metric.Int64Counter
 	connectionStatus            metric.Int64UpDownCounter
-	shutdownTimeouts            metric.Int64Counter
 }
 
 func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistry, error) {
@@ -71,22 +69,12 @@ func RegisterMetricsRegistry(meterProvider metric.MeterProvider) (MetricsRegistr
 		return nil, err
 	}
 
-	shutdownTimeouts, err := meter.Int64Counter(
-		"shutdown_timeouts_total",
-		metric.WithUnit("1"),
-		metric.WithDescription("Total number of shutdown timeout occurrences"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	return &metricsRegistry{
 		httpCallLatencies:           httpCallLatencies,
 		httpCallStatusCodes:         httpCallStatusCodes,
 		serverMessageReceivedByType: serverMessageReceivedByType,
 		connectionRetries:           connectionRetries,
 		connectionStatus:            connectionStatus,
-		shutdownTimeouts:            shutdownTimeouts,
 	}, nil
 }
 
@@ -108,10 +96,6 @@ func (m *metricsRegistry) ConnectionRetries() metric.Int64Counter {
 
 func (m *metricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
 	return m.connectionStatus
-}
-
-func (m *metricsRegistry) ShutdownTimeouts() metric.Int64Counter {
-	return m.shutdownTimeouts
 }
 
 type NoOpMetricsRegistry struct{}
@@ -142,10 +126,5 @@ func (m *NoOpMetricsRegistry) ConnectionRetries() metric.Int64Counter {
 
 func (m *NoOpMetricsRegistry) ConnectionStatus() metric.Int64UpDownCounter {
 	counter, _ := otel.GetMeterProvider().Meter("client").Int64UpDownCounter("connection_status")
-	return counter
-}
-
-func (m *NoOpMetricsRegistry) ShutdownTimeouts() metric.Int64Counter {
-	counter, _ := otel.GetMeterProvider().Meter("client").Int64Counter("shutdown_timeouts_total")
 	return counter
 }

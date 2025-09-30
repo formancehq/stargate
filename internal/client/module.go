@@ -150,9 +150,6 @@ func Module(
 							"running_workers": client.workerPool.RunningWorkers(),
 						}).Error("timeout waiting for client to stop, forcing shutdown")
 
-						// Record timeout metric
-						client.metricsRegistry.ShutdownTimeouts().Add(ctx, 1)
-
 						// Force stop worker pool
 						client.workerPool.Stop()
 
