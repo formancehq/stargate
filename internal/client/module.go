@@ -45,7 +45,9 @@ func Module(
 				h = wrappedRouter
 			}
 
-			l.Infof("HTTP server listening on %s", bind)
+			l.WithFields(map[string]any{
+				"bind": bind,
+			}).Info("HTTP server listening")
 			lc.Append(httpserver.NewHook(h, httpserver.WithAddress(bind)))
 		}),
 
@@ -91,15 +93,21 @@ func Module(
 								runtimedebug.PrintStack()
 								err, ok := r.(error)
 								if ok {
-									l.Errorf("recovering error: %w", err)
+									l.WithFields(map[string]any{
+										"error": err.Error(),
+									}).Error("recovering error")
 									clientDone <- err
 								} else {
-									l.Errorf("recovering panic: %v", r)
+									l.WithFields(map[string]any{
+										"panic": r,
+									}).Error("recovering panic")
 									clientDone <- fmt.Errorf("panic: %v", r)
 								}
 
 								if err := shutdowner.Shutdown(); err != nil {
-									l.Errorf("error during shutdown: %v", err)
+									l.WithFields(map[string]any{
+										"error": err.Error(),
+									}).Error("error during shutdown")
 									panic(err)
 								}
 							}
@@ -111,9 +119,13 @@ func Module(
 							if errors.Is(err, context.Canceled) {
 								l.Info("client stopped gracefully")
 							} else {
-								l.Errorf("client stopped with error: %v", err)
+								l.WithFields(map[string]any{
+									"error": err.Error(),
+								}).Error("client stopped with error")
 								if err := shutdowner.Shutdown(); err != nil {
-									l.Errorf("error during shutdown: %v", err)
+									l.WithFields(map[string]any{
+										"error": err.Error(),
+									}).Error("error during shutdown")
 									panic(err)
 								}
 							}
@@ -131,8 +143,10 @@ func Module(
 					// Wait for client to finish with timeout
 					select {
 					case err := <-clientDone:
-						if errors.Is(err, context.Canceled) {
-							l.Errorf("client error during shutdown: %v", err)
+						if !errors.Is(err, context.Canceled) {
+							l.WithFields(map[string]any{
+								"error": err.Error(),
+							}).Error("client error during shutdown")
 						}
 					case <-time.After(30 * time.Second):
 						l.Error("timeout waiting for client to stop")

@@ -102,6 +102,14 @@ type Client struct {
 	grpcConn              *grpc.ClientConn
 }
 
+// logWithContext returns a logger with common context fields (organization_id, stack_id)
+func (c *Client) logWithContext() logging.Logger {
+	return c.logger.WithFields(map[string]any{
+		"organization_id": c.config.OrganizationID,
+		"stack_id":        c.config.StackID,
+	})
+}
+
 func NewClient(
 	l logging.Logger,
 	clientConfig Config,
@@ -144,13 +152,13 @@ type ResponseChanEvent struct {
 func (c *Client) createGRPCConnection() error {
 	var credential credentials.TransportCredentials
 	if !c.tlsEnabled {
-		c.logger.Infof("TLS not enabled")
+		c.logWithContext().Info("TLS not enabled")
 		credential = insecure.NewCredentials()
 	} else {
 		var certPool *x509.CertPool
 		if c.tlsCACertificate != "" {
 			certPool = x509.NewCertPool()
-			c.logger.Infof("Load server certificate from config")
+			c.logWithContext().Info("load server certificate from config")
 			if !certPool.AppendCertsFromPEM([]byte(c.tlsCACertificate)) {
 				return fmt.Errorf("failed to add server CA's certificate")
 			}
@@ -163,7 +171,7 @@ func (c *Client) createGRPCConnection() error {
 		}
 
 		if c.tlsInsecureSkipVerify {
-			c.logger.Infof("Disable certificate checks")
+			c.logWithContext().Info("disable certificate checks")
 		}
 
 		credential = credentials.NewTLS(&tls.Config{
@@ -183,7 +191,10 @@ func (c *Client) createGRPCConnection() error {
 		grpc.WithTransportCredentials(credential),
 	)
 	if err != nil {
-		c.logger.Errorf("failed to connect to stargate server '%s': %s", c.serverURL, err)
+		c.logWithContext().WithFields(map[string]any{
+			"server_url": c.serverURL,
+			"error":      err.Error(),
+		}).Error("failed to connect to stargate server")
 		return err
 	}
 
@@ -193,7 +204,7 @@ func (c *Client) createGRPCConnection() error {
 }
 
 func (c *Client) Run(ctx context.Context) error {
-	c.logger.Info("starting client...")
+	c.logWithContext().Info("starting client...")
 
 	retryCount := 0
 	for {
@@ -203,7 +214,7 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		if ctx.Err() != nil {
-			c.logger.Info("context cancelled, stopping client")
+			c.logWithContext().Info("context cancelled, stopping client")
 			return ctx.Err()
 		}
 
@@ -463,7 +474,10 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 		now := time.Now()
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			c.logger.Errorf("error making http request: %v", err)
+			c.logWithContext().WithFields(map[string]any{
+				"error": err.Error(),
+				"path":  ev.ApiCall.Path,
+			}).Error("error making http request")
 			return &ResponseChanEvent{
 				err: nil,
 				msg: &generated.StargateClientMessage{
