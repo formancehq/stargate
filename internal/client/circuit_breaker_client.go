@@ -102,7 +102,7 @@ func (c *CircuitBreakerHTTPClient) Do(req *http.Request) (*http.Response, error)
 		// Treat 5xx responses as failures for circuit breaker
 		if resp.StatusCode >= 500 {
 			// Close the body to avoid leaking resources
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, &httpError{StatusCode: resp.StatusCode}
 		}
 		return resp, nil
