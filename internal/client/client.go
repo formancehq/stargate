@@ -137,8 +137,9 @@ func NewClient(
 }
 
 type ResponseChanEvent struct {
-	msg *generated.StargateClientMessage
-	err error
+	msg           *generated.StargateClientMessage
+	err           error
+	correlationID string
 }
 
 func (c *Client) createGRPCConnection() error {
@@ -363,8 +364,28 @@ func (c *Client) runStream(ctx context.Context) error {
 				return nil
 			case response := <-responseChan:
 				if response.err != nil {
-					// Note: how should we handle errors here?
-					return response.err
+					c.logger.WithFields(map[string]any{
+						"correlation_id": response.correlationID,
+						"error":          response.err.Error(),
+					}).Error("failed to forward message")
+
+					c.metricsRegistry.ForwardingErrors().Add(ctx, 1)
+
+					// Send error response to server instead of crashing
+					errorResponse := &generated.StargateClientMessage{
+						CorrelationId: response.correlationID,
+						Event: &generated.StargateClientMessage_ApiCallResponse{
+							ApiCallResponse: &generated.StargateClientMessage_APICallResponse{
+								StatusCode: http.StatusInternalServerError,
+								Body:       []byte(response.err.Error()),
+								Headers:    map[string]*generated.Values{},
+							},
+						},
+					}
+					if err := stream.Send(errorResponse); err != nil {
+						return err // Only crash if we can't send the error
+					}
+					continue
 				}
 
 				if response.msg == nil {
@@ -440,7 +461,8 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 		req, err := http.NewRequestWithContext(ctx, ev.ApiCall.Method, c.config.GatewayUrl+"/"+path, bytes.NewReader(ev.ApiCall.Body))
 		if err != nil {
 			return &ResponseChanEvent{
-				err: err,
+				err:           err,
+				correlationID: in.CorrelationId,
 			}
 		}
 
@@ -465,7 +487,8 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 		if err != nil {
 			c.logger.Errorf("error making http request: %v", err)
 			return &ResponseChanEvent{
-				err: nil,
+				err:           nil,
+				correlationID: in.CorrelationId,
 				msg: &generated.StargateClientMessage{
 					CorrelationId: in.CorrelationId,
 					Event: &generated.StargateClientMessage_ApiCallResponse{ApiCallResponse: &generated.StargateClientMessage_APICallResponse{
@@ -482,7 +505,8 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return &ResponseChanEvent{
-				err: err,
+				err:           err,
+				correlationID: in.CorrelationId,
 			}
 		}
 
@@ -497,7 +521,8 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 		c.metricsRegistry.HTTPCallStatusCodes().Add(ctx, 1, metric.WithAttributes(attrs...))
 
 		return &ResponseChanEvent{
-			err: nil,
+			err:           nil,
+			correlationID: in.CorrelationId,
 			msg: &generated.StargateClientMessage{
 				CorrelationId: in.CorrelationId,
 				Event: &generated.StargateClientMessage_ApiCallResponse{ApiCallResponse: &generated.StargateClientMessage_APICallResponse{
@@ -509,7 +534,8 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 		}
 	case *generated.StargateServerMessage_Ping_:
 		return &ResponseChanEvent{
-			err: nil,
+			err:           nil,
+			correlationID: in.CorrelationId,
 			msg: &generated.StargateClientMessage{
 				CorrelationId: in.CorrelationId,
 				Event: &generated.StargateClientMessage_Pong_{
@@ -520,8 +546,9 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 	}
 
 	return &ResponseChanEvent{
-		err: nil,
-		msg: nil,
+		err:           nil,
+		correlationID: in.CorrelationId,
+		msg:           nil,
 	}
 }
 
