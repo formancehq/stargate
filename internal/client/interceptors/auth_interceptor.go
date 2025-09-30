@@ -97,6 +97,11 @@ func (a *AuthInterceptor) ScheduleRefreshToken() error {
 	}
 
 	go func() {
+		// Create a context for this background goroutine
+		// We use context.TODO() here as this is a long-running background task
+		// that shouldn't be tied to any request-specific context
+		ctx := context.TODO()
+
 		waitingTime := time.Until(expire.Add(-a.config.refreshTokenDurationBeforeExpireTime))
 		if waitingTime < 0 {
 			waitingTime = defaultWaitingTime
@@ -115,12 +120,12 @@ func (a *AuthInterceptor) ScheduleRefreshToken() error {
 						"endpoint":      a.config.endpoint,
 					}).Error("failed to refresh authentication token")
 
-					a.metricsRegistry.AuthTokenRefreshErrors().Add(context.Background(), 1)
+					a.metricsRegistry.AuthTokenRefreshErrors().Add(ctx, 1)
 					waitingTime = time.Second
 				} else {
 					duration := time.Since(start)
-					a.metricsRegistry.AuthTokenRefreshDuration().Record(context.Background(), duration.Milliseconds())
-					a.metricsRegistry.AuthTokenExpiry().Record(context.Background(), float64(expire.Unix()))
+					a.metricsRegistry.AuthTokenRefreshDuration().Record(ctx, duration.Milliseconds())
+					a.metricsRegistry.AuthTokenExpiry().Record(ctx, float64(expire.Unix()))
 
 					a.logger.WithFields(map[string]any{
 						"expiry":         expire.Format(time.RFC3339),
@@ -152,7 +157,8 @@ func (a *AuthInterceptor) refreshToken() (time.Time, error) {
 		TokenURL:     discoveryConfiguration.TokenEndpoint,
 	}
 
-	token, err := config.Token(context.Background())
+	// Use context.TODO() for OAuth token fetch as this is not tied to any specific request
+	token, err := config.Token(context.TODO())
 	if err != nil {
 		return time.Time{}, errors.Wrapf(err, "cannot fetch token")
 	}
