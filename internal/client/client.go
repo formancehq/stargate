@@ -197,7 +197,10 @@ func (c *Client) Run(ctx context.Context) error {
 
 	retryCount := 0
 	for {
+		connectionStart := time.Now()
 		err := c.runStream(ctx)
+		connectionDuration := time.Since(connectionStart)
+
 		if err == nil {
 			return nil
 		}
@@ -205,6 +208,17 @@ func (c *Client) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			c.logger.Info("context cancelled, stopping client")
 			return ctx.Err()
+		}
+
+		// Reset retry count if connection was stable for more than 30 seconds
+		// This indicates the reconnection was successful and the system recovered
+		const stableConnectionThreshold = 30 * time.Second
+		if connectionDuration > stableConnectionThreshold {
+			c.logger.WithFields(map[string]any{
+				"connection_duration": connectionDuration.String(),
+				"previous_retry_count": retryCount,
+			}).Info("connection was stable, resetting retry count")
+			retryCount = 0
 		}
 
 		if !c.shouldRetry(err) {
@@ -330,29 +344,104 @@ func (c *Client) runStream(ctx context.Context) error {
 
 	responseChan := make(chan *ResponseChanEvent, c.config.ChanSize)
 	eg, ctx := errgroup.WithContext(ctx)
+
+	// Channel to detect recv timeout
+	recvChan := make(chan *generated.StargateServerMessage, 1)
+	recvErrChan := make(chan error, 1)
+
 	eg.Go(func() error {
+		// Separate goroutine for blocking Recv
+		go func() {
+			for {
+				in, err := stream.Recv()
+				if err != nil {
+					select {
+					case recvErrChan <- err:
+					case <-ctx.Done():
+					}
+					return
+				}
+				select {
+				case recvChan <- in:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+
+		// Main loop with timeout detection
+		// Server sends Ping every 10s, so if we don't receive anything in 15s, connection is dead
+		const recvTimeout = 15 * time.Second
+		timer := time.NewTimer(recvTimeout)
+		defer timer.Stop()
+
 		for {
-			in, err := stream.Recv()
-			if err != nil {
+			select {
+			case <-ctx.Done():
+				return nil
+			case err := <-recvErrChan:
 				if err == io.EOF {
 					return nil
 				}
-
 				return err
-			}
-
-			c.logger.WithFields(map[string]any{
-				"event": in,
-			}).Debug("received message from server")
-
-			c.workerPool.Submit(func() {
-				out := c.Forward(ctx, in)
-				select {
-				case <-ctx.Done():
-					return
-				case responseChan <- out:
+			case <-timer.C:
+				c.logger.WithFields(map[string]any{
+					"timeout_seconds": recvTimeout.Seconds(),
+				}).Error("no message received from server within timeout")
+				return fmt.Errorf("recv timeout after %v", recvTimeout)
+			case in := <-recvChan:
+				// Reset timeout on successful receive
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
 				}
-			})
+				timer.Reset(recvTimeout)
+
+				c.logger.WithFields(map[string]any{
+					"event": in,
+				}).Debug("received message from server")
+
+				// Handle Ping messages immediately without worker pool to prevent deadlock
+				if _, isPing := in.Event.(*generated.StargateServerMessage_Ping_); isPing {
+					pongEvent := &ResponseChanEvent{
+						err: nil,
+						msg: &generated.StargateClientMessage{
+							CorrelationId: in.CorrelationId,
+							Event: &generated.StargateClientMessage_Pong_{
+								Pong: &generated.StargateClientMessage_Pong{},
+							},
+						},
+					}
+					select {
+					case <-ctx.Done():
+						return nil
+					case responseChan <- pongEvent:
+					default:
+						c.logger.WithFields(map[string]any{
+							"channel_capacity": c.config.ChanSize,
+							"correlation_id":   in.CorrelationId,
+						}).Error("response channel full, cannot send pong")
+						select {
+						case <-ctx.Done():
+							return nil
+						case responseChan <- pongEvent:
+						}
+					}
+					continue
+				}
+
+				// Process other messages through worker pool
+				c.workerPool.Submit(func() {
+					out := c.Forward(ctx, in)
+					select {
+					case <-ctx.Done():
+						return
+					case responseChan <- out:
+					}
+				})
+			}
 		}
 	})
 
@@ -377,6 +466,10 @@ func (c *Client) runStream(ctx context.Context) error {
 
 				err := stream.Send(response.msg)
 				if err != nil {
+					c.logger.WithFields(map[string]any{
+						"error":          err.Error(),
+						"correlation_id": response.msg.CorrelationId,
+					}).Error("failed to send message to server")
 					return err
 				}
 			}
