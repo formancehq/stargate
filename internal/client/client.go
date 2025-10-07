@@ -54,6 +54,7 @@ type Config struct {
 	InitialRetryDelay       time.Duration
 	MaxRetryDelay           time.Duration
 	RetryMultiplier         float64
+	RecvTimeout             time.Duration
 }
 
 func NewClientConfig(
@@ -77,6 +78,7 @@ func NewClientConfig(
 		InitialRetryDelay:       time.Second,
 		MaxRetryDelay:           30 * time.Second,
 		RetryMultiplier:         2.0,
+		RecvTimeout:             15 * time.Second,
 	}
 }
 
@@ -198,7 +200,7 @@ func (c *Client) Run(ctx context.Context) error {
 	retryCount := 0
 	for {
 		connectionStart := time.Now()
-		err := c.runStream(ctx)
+		err := c.runStream(ctx) // Blocks until stream disconnects or errors
 		connectionDuration := time.Since(connectionStart)
 
 		if err == nil {
@@ -343,6 +345,11 @@ func (c *Client) runStream(ctx context.Context) error {
 	}()
 
 	responseChan := make(chan *ResponseChanEvent, c.config.ChanSize)
+
+	// Create cancellable context to ensure all goroutines terminate cleanly
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Channel to detect recv timeout
@@ -370,9 +377,8 @@ func (c *Client) runStream(ctx context.Context) error {
 		}()
 
 		// Main loop with timeout detection
-		// Server sends Ping every 10s, so if we don't receive anything in 15s, connection is dead
-		const recvTimeout = 15 * time.Second
-		timer := time.NewTimer(recvTimeout)
+		// Server sends Ping every 10s, so if we don't receive anything within RecvTimeout, connection is dead
+		timer := time.NewTimer(c.config.RecvTimeout)
 		defer timer.Stop()
 
 		for {
@@ -380,24 +386,26 @@ func (c *Client) runStream(ctx context.Context) error {
 			case <-ctx.Done():
 				return nil
 			case err := <-recvErrChan:
+				cancel() // Cancel context to unblock other goroutines
 				if err == io.EOF {
 					return nil
 				}
 				return err
 			case <-timer.C:
 				c.logger.WithFields(map[string]any{
-					"timeout_seconds": recvTimeout.Seconds(),
+					"timeout_seconds": c.config.RecvTimeout.Seconds(),
 				}).Error("no message received from server within timeout")
-				return fmt.Errorf("recv timeout after %v", recvTimeout)
+				return fmt.Errorf("recv timeout after %v", c.config.RecvTimeout)
 			case in := <-recvChan:
 				// Reset timeout on successful receive
+				// Standard pattern: if Stop() returns false, timer already expired, drain channel
 				if !timer.Stop() {
 					select {
 					case <-timer.C:
 					default:
 					}
 				}
-				timer.Reset(recvTimeout)
+				timer.Reset(c.config.RecvTimeout)
 
 				c.logger.WithFields(map[string]any{
 					"event": in,
@@ -427,6 +435,9 @@ func (c *Client) runStream(ctx context.Context) error {
 						case <-ctx.Done():
 							return nil
 						case responseChan <- pongEvent:
+							c.logger.WithFields(map[string]any{
+								"correlation_id": in.CorrelationId,
+							}).Info("pong sent successfully after channel was full")
 						}
 					}
 					continue
