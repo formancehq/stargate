@@ -43,18 +43,19 @@ func NewWorkerPoolConfig(maxWorkers, maxTasks int) WorkerPoolConfig {
 }
 
 type Config struct {
-	OrganizationID          string
-	StackID                 string
-	ChanSize                int
-	GatewayUrl              string
-	HTTPClientTimeout       time.Duration
-	HTTPMaxIdleConns        int
-	HTTPMaxIdleConnsPerHost int
-	MaxRetries              int
-	InitialRetryDelay       time.Duration
-	MaxRetryDelay           time.Duration
-	RetryMultiplier         float64
-	RecvTimeout             time.Duration
+	OrganizationID              string
+	StackID                     string
+	ChanSize                    int
+	GatewayUrl                  string
+	HTTPClientTimeout           time.Duration
+	HTTPMaxIdleConns            int
+	HTTPMaxIdleConnsPerHost     int
+	MaxRetries                  int
+	InitialRetryDelay           time.Duration
+	MaxRetryDelay               time.Duration
+	RetryMultiplier             float64
+	RecvTimeout                 time.Duration
+	StableConnectionThreshold   time.Duration
 }
 
 func NewClientConfig(
@@ -67,18 +68,19 @@ func NewClientConfig(
 	httpMaxIdleConnsPerHost int,
 ) Config {
 	return Config{
-		OrganizationID:          organizationID,
-		StackID:                 stackID,
-		ChanSize:                chanSize,
-		GatewayUrl:              gatewayUrl,
-		HTTPClientTimeout:       httpClientTimeout,
-		HTTPMaxIdleConns:        httpMaxIdleConns,
-		HTTPMaxIdleConnsPerHost: httpMaxIdleConnsPerHost,
-		MaxRetries:              5,
-		InitialRetryDelay:       time.Second,
-		MaxRetryDelay:           30 * time.Second,
-		RetryMultiplier:         2.0,
-		RecvTimeout:             15 * time.Second,
+		OrganizationID:            organizationID,
+		StackID:                   stackID,
+		ChanSize:                  chanSize,
+		GatewayUrl:                gatewayUrl,
+		HTTPClientTimeout:         httpClientTimeout,
+		HTTPMaxIdleConns:          httpMaxIdleConns,
+		HTTPMaxIdleConnsPerHost:   httpMaxIdleConnsPerHost,
+		MaxRetries:                5,
+		InitialRetryDelay:         time.Second,
+		MaxRetryDelay:             30 * time.Second,
+		RetryMultiplier:           2.0,
+		RecvTimeout:               15 * time.Second,
+		StableConnectionThreshold: 30 * time.Second,
 	}
 }
 
@@ -212,13 +214,13 @@ func (c *Client) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		// Reset retry count if connection was stable for more than 30 seconds
+		// Reset retry count if connection was stable
 		// This indicates the reconnection was successful and the system recovered
-		const stableConnectionThreshold = 30 * time.Second
-		if connectionDuration > stableConnectionThreshold {
+		if connectionDuration > c.config.StableConnectionThreshold {
 			c.logger.WithFields(map[string]any{
-				"connection_duration": connectionDuration.String(),
-				"previous_retry_count": retryCount,
+				"connection_duration":              connectionDuration.String(),
+				"previous_retry_count":             retryCount,
+				"stable_connection_threshold":      c.config.StableConnectionThreshold.String(),
 			}).Info("connection was stable, resetting retry count")
 			retryCount = 0
 		}
@@ -614,16 +616,6 @@ func (c *Client) Forward(ctx context.Context, in *generated.StargateServerMessag
 					Body:       body,
 					Headers:    headers,
 				}},
-			},
-		}
-	case *generated.StargateServerMessage_Ping_:
-		return &ResponseChanEvent{
-			err: nil,
-			msg: &generated.StargateClientMessage{
-				CorrelationId: in.CorrelationId,
-				Event: &generated.StargateClientMessage_Pong_{
-					Pong: &generated.StargateClientMessage_Pong{},
-				},
 			},
 		}
 	}
