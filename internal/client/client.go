@@ -378,7 +378,12 @@ func (c *Client) runStream(ctx context.Context) error {
 
 		// Main loop with timeout detection
 		// Server sends Ping every 10s, so if we don't receive anything within RecvTimeout, connection is dead
-		timer := time.NewTimer(c.config.RecvTimeout)
+		// Guard against zero RecvTimeout to avoid immediate expiration
+		timeout := c.config.RecvTimeout
+		if timeout <= 0 {
+			timeout = 15 * time.Second
+		}
+		timer := time.NewTimer(timeout)
 		defer timer.Stop()
 
 		for {
@@ -393,9 +398,9 @@ func (c *Client) runStream(ctx context.Context) error {
 				return err
 			case <-timer.C:
 				c.logger.WithFields(map[string]any{
-					"timeout_seconds": c.config.RecvTimeout.Seconds(),
+					"timeout_seconds": timeout.Seconds(),
 				}).Error("no message received from server within timeout")
-				return fmt.Errorf("recv timeout after %v", c.config.RecvTimeout)
+				return fmt.Errorf("recv timeout after %v", timeout)
 			case in := <-recvChan:
 				// Reset timeout on successful receive
 				// Standard pattern: if Stop() returns false, timer already expired, drain channel
@@ -405,7 +410,7 @@ func (c *Client) runStream(ctx context.Context) error {
 					default:
 					}
 				}
-				timer.Reset(c.config.RecvTimeout)
+				timer.Reset(timeout)
 
 				c.logger.WithFields(map[string]any{
 					"event": in,
