@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/zitadel/oidc/pkg/client"
+	"github.com/zitadel/oidc/v3/pkg/client"
 	"golang.org/x/oauth2/clientcredentials"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -114,7 +114,7 @@ func (a *AuthInterceptor) ScheduleRefreshToken() error {
 }
 
 func (a *AuthInterceptor) refreshToken() (time.Time, error) {
-	discoveryConfiguration, err := client.Discover(a.config.endpoint, a.httpClient)
+	discoveryConfiguration, err := client.Discover(context.Background(), a.config.endpoint, a.httpClient)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("cannot discover endpoint: %w", err)
 	}
