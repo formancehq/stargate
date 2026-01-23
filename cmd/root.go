@@ -38,7 +38,7 @@ func NewRootCommand() *cobra.Command {
 	client.Flags().Int(workerPoolMaxWorkersFlag, 100, "Max worker pool size")
 	client.Flags().Int(workerPoolMaxTasksFlag, 10000, "Max worker pool tasks")
 	client.Flags().Int(ClientChanSizeFlag, 1024, "Client chan size")
-	client.Flags().Duration(HTTPClientTimeoutFlag, 10*time.Second, "HTTP client timeout")
+	client.Flags().Duration(HTTPClientTimeoutFlag, 10*time.Minute, "HTTP client timeout")
 	client.Flags().Int(HTTPClientMaxIdleConnsFlag, 100, "HTTP client max idle conns")
 	client.Flags().Int(HTTPClientMaxIdleConnsPerHostFlag, 2, "HTTP client max idle conns per host")
 	client.Flags().Int(MaxRetriesFlag, 5, "Maximum number of retry attempts on connection failure")
