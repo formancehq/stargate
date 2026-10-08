@@ -1,5 +1,6 @@
 FROM ghcr.io/formancehq/base:scratch
-COPY stargate /usr/bin/stargate
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/stargate /usr/bin/stargate
 ENV OTEL_SERVICE_NAME stargate
 ENTRYPOINT ["/usr/bin/stargate"]
 CMD ["client"]
