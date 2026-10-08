@@ -4,7 +4,7 @@ project_name: stargate
 
 includes:
   - from_url:
-      url: https://raw.githubusercontent.com/formancehq/earthly/refs/heads/main/.goreleaser.default.yaml
+      url: https://raw.githubusercontent.com/formancehq/earthly/refs/heads/main/.goreleaser.default-v2.yaml
 
 
 builds:
@@ -25,9 +25,9 @@ builds:
 
 archives:
   - id: "{{.ProjectName}}"
-    builds:
+    ids:
       - stargate
-    format: tar.gz
+    formats: [tar.gz]
     name_template: "{{.ProjectName}}_{{.Os}}-{{.Arch}}"
 
 release:
