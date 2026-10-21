@@ -1,4 +1,4 @@
-FROM ghcr.io/formancehq/base:22.04
+FROM ghcr.io/formancehq/base:26.04
 ARG TARGETPLATFORM
 COPY $TARGETPLATFORM/stargate /usr/bin/stargate
 ENV OTEL_SERVICE_NAME stargate
