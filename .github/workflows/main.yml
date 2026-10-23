@@ -7,7 +7,7 @@ on:
       - release/*
       - releases/*
   pull_request:
-    types: [ assigned, opened, synchronize, reopened, labeled, edited ]
+    types: [ assigned, opened, synchronize, reopened, edited ]
 
 permissions:
   contents: read
@@ -38,8 +38,7 @@ jobs:
     needs: [Dirty]
     uses: formancehq/ci/.github/workflows/go-build.yml@v1
     with:
-      build-condition: main-and-label
-      build-label: build-images
+      build-condition: main-only
     secrets:
       NUMARY_GITHUB_TOKEN: ${{ secrets.NUMARY_GITHUB_TOKEN }}
       FURY_TOKEN: ${{ secrets.FURY_TOKEN }}
